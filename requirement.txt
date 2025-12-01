@@ -1,0 +1,5 @@
+guitarpro
+jams
+mido
+tqdm
+matplotlib
