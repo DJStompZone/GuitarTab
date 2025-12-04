@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Optional, TypedDict
 import numpy as np
 from tqdm import tqdm
+import torch
 
 from src.dadagp_parser import (
     parse_dadagp_file,
@@ -350,6 +351,8 @@ class TabDataset:
         segments: list[tuple[list[int], list[int]]] = []
 
         if not bar_positions:
+            raise ValueError("No bar positions found")
+
             # No bars found, return whole sequence if small enough
             if len(input_ids) <= self.max_sequence_length:
                 return [(input_ids, output_ids)]
@@ -407,6 +410,9 @@ class TabDataset:
 
         Returns:
             Tuple of (input_ids, output_ids) as numpy arrays
+            - input_ids: [input_seq_len] - Input sequence token IDs
+            - output_ids: [output_seq_len] - Output sequence token IDs
+            Note: input_seq_len != output_seq_len (output has extra TAB tokens)
         """
         input_ids, output_ids = self.segments[idx]
         return np.array(input_ids, dtype=np.int64), np.array(output_ids, dtype=np.int64)
@@ -426,10 +432,10 @@ class TabDataset:
 
 
 class TabDatasetBatchInput(TypedDict):
-    input_ids: np.ndarray
-    output_ids: np.ndarray
-    attention_mask: np.ndarray
-    decoder_attention_mask: np.ndarray
+    input_ids: torch.Tensor  # [B, L_enc]
+    output_ids: torch.Tensor  # [B, L_dec]
+    attention_mask: torch.Tensor  # [B, L_enc]
+    decoder_attention_mask: torch.Tensor  # [B, L_dec]
 
 
 def collate_fn(
@@ -441,12 +447,15 @@ def collate_fn(
     Collate function for batching with padding.
 
     Args:
-        batch: List of (input_ids, output_ids) tuples
-        input_pad_id: Padding token ID for input
-        output_pad_id: Padding token ID for output
+        batch: List of (input_ids, output_ids) tuples from __getitem__
+               Each item: (input_ids[L_in], output_ids[L_out])
 
     Returns:
-        Dictionary with padded tensors and attention masks
+        Dictionary with padded tensors and attention masks:
+        - input_ids: [batch_size, max_input_len] - Padded input sequences
+        - output_ids: [batch_size, max_output_len] - Padded output sequences
+        - attention_mask: [batch_size, max_input_len] - Input padding mask (1=real, 0=pad)
+        - decoder_attention_mask: [batch_size, max_output_len] - Output padding mask (1=real, 0=pad)
     """
     input_ids_list = [item[0] for item in batch]
     output_ids_list = [item[1] for item in batch]
@@ -476,8 +485,8 @@ def collate_fn(
         output_masks[i, :output_len] = 1
 
     return {
-        "input_ids": padded_inputs,
-        "output_ids": padded_outputs,
-        "attention_mask": input_masks,
-        "decoder_attention_mask": output_masks,
+        "input_ids": torch.from_numpy(padded_inputs),
+        "output_ids": torch.from_numpy(padded_outputs),
+        "attention_mask": torch.from_numpy(input_masks),
+        "decoder_attention_mask": torch.from_numpy(output_masks),
     }
