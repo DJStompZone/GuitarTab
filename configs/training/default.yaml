@@ -1,0 +1,35 @@
+# Training hyperparameters
+
+# Optimizer (Adafactor as per paper)
+optimizer:
+  name: "adafactor"
+  lr: 1e-3
+  weight_decay: 0.0
+  scale_parameter: true
+  relative_step: false
+  warmup_init: false
+
+# Learning rate scheduler
+scheduler:
+  name: "linear_warmup"
+  num_warmup_steps: 1000
+  num_training_steps: 50000  # Will be computed based on dataset size
+
+# Training settings
+num_epochs: 10
+max_steps: null  # null = use num_epochs
+gradient_accumulation_steps: 1
+max_grad_norm: 1.0
+
+# Checkpointing
+save_steps: 1000
+eval_steps: 500
+logging_steps: 100
+save_total_limit: 3
+
+# Mixed precision
+fp16: false
+bf16: false
+
+# Evaluation
+eval_batch_size: 64

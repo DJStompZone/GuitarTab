@@ -1,0 +1,28 @@
+# Debug dataset configuration - uses only 5 files for quick testing
+
+name: "dadagp_debug"
+
+# Data paths
+data_dir: "DadaGP-v1.1"
+token_pattern: "**/*.tokens.txt"
+selected_files_json: null  # null = use all files, or path to JSON file with .gp file names
+
+# Dataset parameters
+max_sequence_length: 512
+max_pitch: 127
+max_time_shift: 500
+num_strings: 6
+num_frets: 21
+
+# Train/val/test split
+train_ratio: 0.7
+val_ratio: 0.15
+test_ratio: 0.15
+
+# DataLoader settings
+batch_size: 4
+num_workers: 0  # Disable multiprocessing for debugging
+pin_memory: false
+
+# Limit number of files for debugging
+max_files: 5  # Use only 5 files

@@ -6,7 +6,7 @@ Loads .tokens.txt files, converts to our event format, tokenizes, and segments.
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Optional
+from typing import Optional, TypedDict
 import numpy as np
 from tqdm import tqdm
 
@@ -27,9 +27,11 @@ from src.dadagp_parser import (
 # Event to Token ID Conversion
 # ============================================================================
 
+
 @dataclass
 class Vocabulary:
     """Vocabulary for tokenization."""
+
     token_to_id: dict[str, int]
     id_to_token: dict[int, str]
     vocab_size: int
@@ -45,7 +47,7 @@ def build_vocabulary(
     max_pitch: int = 127,
     max_time_shift: int = 500,
     num_strings: int = 6,
-    num_frets: int = 21
+    num_frets: int = 21,
 ) -> tuple[Vocabulary, Vocabulary]:
     """
     Build vocabularies for input and output sequences.
@@ -65,28 +67,28 @@ def build_vocabulary(
     idx = 0
 
     # Special tokens
-    for token in ['PAD', 'BOS', 'EOS', 'UNK']:
+    for token in ["PAD", "BOS", "EOS", "UNK"]:
         input_token_to_id[token] = idx
         input_id_to_token[idx] = token
         idx += 1
 
     # NOTE_ON tokens
     for pitch in range(max_pitch + 1):
-        token = f'NOTE_ON_{pitch}'
+        token = f"NOTE_ON_{pitch}"
         input_token_to_id[token] = idx
         input_id_to_token[idx] = token
         idx += 1
 
     # NOTE_OFF tokens
     for pitch in range(max_pitch + 1):
-        token = f'NOTE_OFF_{pitch}'
+        token = f"NOTE_OFF_{pitch}"
         input_token_to_id[token] = idx
         input_id_to_token[idx] = token
         idx += 1
 
     # TIME_SHIFT tokens
     for shift in range(1, max_time_shift + 1):
-        token = f'TIME_SHIFT_{shift}'
+        token = f"TIME_SHIFT_{shift}"
         input_token_to_id[token] = idx
         input_id_to_token[idx] = token
         idx += 1
@@ -98,7 +100,7 @@ def build_vocabulary(
         pad_id=0,
         bos_id=1,
         eos_id=2,
-        unk_id=3
+        unk_id=3,
     )
 
     # Build output vocabulary (NOTE_ON, NOTE_OFF, TIME_SHIFT, TAB)
@@ -107,28 +109,28 @@ def build_vocabulary(
     idx = 0
 
     # Special tokens
-    for token in ['PAD', 'BOS', 'EOS', 'UNK']:
+    for token in ["PAD", "BOS", "EOS", "UNK"]:
         output_token_to_id[token] = idx
         output_id_to_token[idx] = token
         idx += 1
 
     # NOTE_ON tokens
     for pitch in range(max_pitch + 1):
-        token = f'NOTE_ON_{pitch}'
+        token = f"NOTE_ON_{pitch}"
         output_token_to_id[token] = idx
         output_id_to_token[idx] = token
         idx += 1
 
     # NOTE_OFF tokens
     for pitch in range(max_pitch + 1):
-        token = f'NOTE_OFF_{pitch}'
+        token = f"NOTE_OFF_{pitch}"
         output_token_to_id[token] = idx
         output_id_to_token[idx] = token
         idx += 1
 
     # TIME_SHIFT tokens
     for shift in range(1, max_time_shift + 1):
-        token = f'TIME_SHIFT_{shift}'
+        token = f"TIME_SHIFT_{shift}"
         output_token_to_id[token] = idx
         output_id_to_token[idx] = token
         idx += 1
@@ -136,7 +138,7 @@ def build_vocabulary(
     # TAB tokens
     for string in range(1, num_strings + 1):
         for fret in range(num_frets):
-            token = f'TAB_{string}_{fret}'
+            token = f"TAB_{string}_{fret}"
             output_token_to_id[token] = idx
             output_id_to_token[idx] = token
             idx += 1
@@ -148,7 +150,7 @@ def build_vocabulary(
         pad_id=0,
         bos_id=1,
         eos_id=2,
-        unk_id=3
+        unk_id=3,
     )
 
     return input_vocab, output_vocab
@@ -165,15 +167,15 @@ def event_to_token_string(event: Event) -> str:
         Token string (e.g., "NOTE_ON_60")
     """
     if isinstance(event, NoteOnEvent):
-        return f'NOTE_ON_{event.pitch}'
+        return f"NOTE_ON_{event.pitch}"
     elif isinstance(event, NoteOffEvent):
-        return f'NOTE_OFF_{event.pitch}'
+        return f"NOTE_OFF_{event.pitch}"
     elif isinstance(event, TimeShiftEvent):
-        return f'TIME_SHIFT_{event.delta}'
+        return f"TIME_SHIFT_{event.delta}"
     elif isinstance(event, TabEvent):
-        return f'TAB_{event.string}_{event.fret}'
+        return f"TAB_{event.string}_{event.fret}"
     else:
-        return 'UNK'
+        return "UNK"
 
 
 def events_to_ids(events: list[Event], vocab: Vocabulary) -> list[int]:
@@ -199,10 +201,9 @@ def events_to_ids(events: list[Event], vocab: Vocabulary) -> list[int]:
 # Bar-Aligned Splitting
 # ============================================================================
 
+
 def find_split_bar_near_length(
-    bar_positions: list[tuple[int, int]],
-    target_length: int,
-    current_bar_idx: int = 0
+    bar_positions: list[tuple[int, int]], target_length: int, current_bar_idx: int = 0
 ) -> Optional[int]:
     """
     Find the bar index closest to target_length from current bar.
@@ -236,8 +237,7 @@ def find_split_bar_near_length(
 
     # Find closest to ideal split
     closest_bar_idx = min(
-        candidate_bars,
-        key=lambda idx: abs(bar_positions[idx][0] - ideal_input_split)
+        candidate_bars, key=lambda idx: abs(bar_positions[idx][0] - ideal_input_split)
     )
     return closest_bar_idx
 
@@ -245,6 +245,7 @@ def find_split_bar_near_length(
 # ============================================================================
 # Dataset
 # ============================================================================
+
 
 class TabDataset:
     """
@@ -282,7 +283,7 @@ class TabDataset:
             max_pitch=max_pitch,
             max_time_shift=max_time_shift,
             num_strings=num_strings,
-            num_frets=num_frets
+            num_frets=num_frets,
         )
 
         print(f"Input vocab size: {self.input_vocab.vocab_size}")
@@ -309,14 +310,18 @@ class TabDataset:
                 dadagp_tokens = parse_dadagp_file(token_file)
 
                 # Convert to events with bar positions
-                input_events, output_events, bar_positions = dadagp_to_events(dadagp_tokens)
+                input_events, output_events, bar_positions = dadagp_to_events(
+                    dadagp_tokens
+                )
 
                 # Convert to IDs
                 input_ids = events_to_ids(input_events, self.input_vocab)
                 output_ids = events_to_ids(output_events, self.output_vocab)
 
                 # Split into segments at bar boundaries
-                segments = self._split_into_segments(input_ids, output_ids, bar_positions)
+                segments = self._split_into_segments(
+                    input_ids, output_ids, bar_positions
+                )
                 all_segments.extend(segments)
 
             except Exception as e:
@@ -329,7 +334,7 @@ class TabDataset:
         self,
         input_ids: list[int],
         output_ids: list[int],
-        bar_positions: list[tuple[int, int]]
+        bar_positions: list[tuple[int, int]],
     ) -> list[tuple[list[int], list[int]]]:
         """
         Split sequences into segments at bar boundaries.
@@ -357,9 +362,7 @@ class TabDataset:
         while current_bar_idx < len(bar_positions):
             # Find next split point
             split_bar_idx = find_split_bar_near_length(
-                bar_positions,
-                self.max_sequence_length,
-                current_bar_idx
+                bar_positions, self.max_sequence_length, current_bar_idx
             )
 
             if split_bar_idx is None:
@@ -421,9 +424,19 @@ class TabDataset:
 # Collate Function for DataLoader
 # ============================================================================
 
-def collate_fn(batch: list[tuple[np.ndarray, np.ndarray]],
-               input_pad_id: int = 0,
-               output_pad_id: int = 0) -> dict[str, np.ndarray]:
+
+class TabDatasetBatchInput(TypedDict):
+    input_ids: np.ndarray
+    output_ids: np.ndarray
+    attention_mask: np.ndarray
+    decoder_attention_mask: np.ndarray
+
+
+def collate_fn(
+    batch: list[tuple[np.ndarray, np.ndarray]],
+    input_pad_id: int = 0,
+    output_pad_id: int = 0,
+) -> TabDatasetBatchInput:
     """
     Collate function for batching with padding.
 
@@ -445,7 +458,9 @@ def collate_fn(batch: list[tuple[np.ndarray, np.ndarray]],
     # Pad sequences
     batch_size = len(batch)
     padded_inputs = np.full((batch_size, max_input_len), input_pad_id, dtype=np.int64)
-    padded_outputs = np.full((batch_size, max_output_len), output_pad_id, dtype=np.int64)
+    padded_outputs = np.full(
+        (batch_size, max_output_len), output_pad_id, dtype=np.int64
+    )
 
     input_masks = np.zeros((batch_size, max_input_len), dtype=np.int64)
     output_masks = np.zeros((batch_size, max_output_len), dtype=np.int64)
@@ -461,8 +476,8 @@ def collate_fn(batch: list[tuple[np.ndarray, np.ndarray]],
         output_masks[i, :output_len] = 1
 
     return {
-        'input_ids': padded_inputs,
-        'output_ids': padded_outputs,
-        'attention_mask': input_masks,
-        'decoder_attention_mask': output_masks
+        "input_ids": padded_inputs,
+        "output_ids": padded_outputs,
+        "attention_mask": input_masks,
+        "decoder_attention_mask": output_masks,
     }

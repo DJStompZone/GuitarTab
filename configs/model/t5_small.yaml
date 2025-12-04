@@ -1,0 +1,21 @@
+# Custom T5 model configuration
+# Based on Fretting-Transformer paper specs
+
+name: "custom_t5_small"
+
+# Architecture (from paper)
+d_model: 128
+d_ff: 1024
+num_layers: 3
+num_heads: 4
+num_decoder_layers: 3
+
+# Dropout
+dropout_rate: 0.1
+
+# Vocabulary sizes (will be set from dataset)
+input_vocab_size: null  # Set dynamically
+output_vocab_size: null  # Set dynamically
+
+# Model initialization
+pretrained: false  # Use custom model, not pretrained T5
