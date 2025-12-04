@@ -1,16 +1,18 @@
 """
 MIDI utilities for reading and writing MIDI files.
-Based on the original utils.py but refactored for modularity.
+Supports both REMI-style events and NOTE ON/OFF + TAB tokenization for guitar tablature.
 """
 
 import numpy as np
 import miditoolkit
 import sys
+import json
 from pathlib import Path
+from typing import List, Tuple, Optional
 
-# Add parent directory to import chord_recognition
-sys.path.append(str(Path(__file__).parent.parent.parent))
-import chord_recognition
+# # Add parent directory to import chord_recognition
+# sys.path.append(str(Path(__file__).parent.parent.parent))
+# import chord_recognition
 
 # Parameters for input
 DEFAULT_VELOCITY_BINS = np.linspace(0, 128, 32 + 1, dtype=np.int32)
@@ -33,7 +35,7 @@ class Item:
         self.pitch = pitch
 
     def __repr__(self):
-        return f'Item(name={self.name}, start={self.start}, end={self.end}, velocity={self.velocity}, pitch={self.pitch})'
+        return f"Item(name={self.name}, start={self.start}, end={self.end}, velocity={self.velocity}, pitch={self.pitch})"
 
 
 class Event:
@@ -46,7 +48,7 @@ class Event:
         self.text = text
 
     def __repr__(self):
-        return f'Event(name={self.name}, time={self.time}, value={self.value}, text={self.text})'
+        return f"Event(name={self.name}, time={self.time}, value={self.value}, text={self.text})"
 
 
 def read_items(file_path):
@@ -68,7 +70,7 @@ def read_items(file_path):
     for note in notes:
         note_items.append(
             Item(
-                name='Note',
+                name="Note",
                 start=note.start,
                 end=note.end,
                 velocity=note.velocity,
@@ -82,7 +84,7 @@ def read_items(file_path):
     for tempo in midi_obj.tempo_changes:
         tempo_items.append(
             Item(
-                name='Tempo',
+                name="Tempo",
                 start=tempo.time,
                 end=None,
                 velocity=None,
@@ -100,7 +102,7 @@ def read_items(file_path):
         if tick in existing_ticks:
             output.append(
                 Item(
-                    name='Tempo',
+                    name="Tempo",
                     start=tick,
                     end=None,
                     velocity=None,
@@ -110,7 +112,7 @@ def read_items(file_path):
         else:
             output.append(
                 Item(
-                    name='Tempo',
+                    name="Tempo",
                     start=tick,
                     end=None,
                     velocity=None,
@@ -158,11 +160,11 @@ def extract_chords(items):
     for chord in chords:
         output.append(
             Item(
-                name='Chord',
+                name="Chord",
                 start=chord[0],
                 end=chord[1],
                 velocity=None,
-                pitch=chord[2].split('/')[0],
+                pitch=chord[2].split("/")[0],
             )
         )
     return output
@@ -207,12 +209,12 @@ def item2event(groups):
     n_downbeat = 0
 
     for i in range(len(groups)):
-        if 'Note' not in [item.name for item in groups[i][1:-1]]:
+        if "Note" not in [item.name for item in groups[i][1:-1]]:
             continue
 
         bar_st, bar_et = groups[i][0], groups[i][-1]
         n_downbeat += 1
-        events.append(Event(name='Bar', time=None, value='None', text=f'{n_downbeat}'))
+        events.append(Event(name="Bar", time=None, value="None", text=f"{n_downbeat}"))
 
         for item in groups[i][1:-1]:
             # Position
@@ -220,70 +222,90 @@ def item2event(groups):
             index = np.argmin(abs(flags - item.start))
             events.append(
                 Event(
-                    name='Position',
+                    name="Position",
                     time=item.start,
-                    value=f'{index+1}/{DEFAULT_FRACTION}',
-                    text=f'{item.start}',
+                    value=f"{index + 1}/{DEFAULT_FRACTION}",
+                    text=f"{item.start}",
                 )
             )
 
-            if item.name == 'Note':
+            if item.name == "Note":
                 # Velocity
                 velocity_index = (
-                    np.searchsorted(DEFAULT_VELOCITY_BINS, item.velocity, side='right') - 1
+                    np.searchsorted(DEFAULT_VELOCITY_BINS, item.velocity, side="right")
+                    - 1
                 )
                 events.append(
                     Event(
-                        name='Note Velocity',
+                        name="Note Velocity",
                         time=item.start,
                         value=velocity_index,
-                        text=f'{item.velocity}/{DEFAULT_VELOCITY_BINS[velocity_index]}',
+                        text=f"{item.velocity}/{DEFAULT_VELOCITY_BINS[velocity_index]}",
                     )
                 )
                 # Pitch
                 events.append(
-                    Event(name='Note On', time=item.start, value=item.pitch, text=f'{item.pitch}')
+                    Event(
+                        name="Note On",
+                        time=item.start,
+                        value=item.pitch,
+                        text=f"{item.pitch}",
+                    )
                 )
                 # Duration
                 duration = item.end - item.start
                 index = np.argmin(abs(DEFAULT_DURATION_BINS - duration))
                 events.append(
                     Event(
-                        name='Note Duration',
+                        name="Note Duration",
                         time=item.start,
                         value=index,
-                        text=f'{duration}/{DEFAULT_DURATION_BINS[index]}',
+                        text=f"{duration}/{DEFAULT_DURATION_BINS[index]}",
                     )
                 )
 
-            elif item.name == 'Chord':
+            elif item.name == "Chord":
                 events.append(
-                    Event(name='Chord', time=item.start, value=item.pitch, text=f'{item.pitch}')
+                    Event(
+                        name="Chord",
+                        time=item.start,
+                        value=item.pitch,
+                        text=f"{item.pitch}",
+                    )
                 )
 
-            elif item.name == 'Tempo':
+            elif item.name == "Tempo":
                 tempo = item.pitch
                 if tempo in DEFAULT_TEMPO_INTERVALS[0]:
-                    tempo_style = Event('Tempo Class', item.start, 'slow', None)
+                    tempo_style = Event("Tempo Class", item.start, "slow", None)
                     tempo_value = Event(
-                        'Tempo Value', item.start, tempo - DEFAULT_TEMPO_INTERVALS[0].start, None
+                        "Tempo Value",
+                        item.start,
+                        tempo - DEFAULT_TEMPO_INTERVALS[0].start,
+                        None,
                     )
                 elif tempo in DEFAULT_TEMPO_INTERVALS[1]:
-                    tempo_style = Event('Tempo Class', item.start, 'mid', None)
+                    tempo_style = Event("Tempo Class", item.start, "mid", None)
                     tempo_value = Event(
-                        'Tempo Value', item.start, tempo - DEFAULT_TEMPO_INTERVALS[1].start, None
+                        "Tempo Value",
+                        item.start,
+                        tempo - DEFAULT_TEMPO_INTERVALS[1].start,
+                        None,
                     )
                 elif tempo in DEFAULT_TEMPO_INTERVALS[2]:
-                    tempo_style = Event('Tempo Class', item.start, 'fast', None)
+                    tempo_style = Event("Tempo Class", item.start, "fast", None)
                     tempo_value = Event(
-                        'Tempo Value', item.start, tempo - DEFAULT_TEMPO_INTERVALS[2].start, None
+                        "Tempo Value",
+                        item.start,
+                        tempo - DEFAULT_TEMPO_INTERVALS[2].start,
+                        None,
                     )
                 elif tempo < DEFAULT_TEMPO_INTERVALS[0].start:
-                    tempo_style = Event('Tempo Class', item.start, 'slow', None)
-                    tempo_value = Event('Tempo Value', item.start, 0, None)
+                    tempo_style = Event("Tempo Class", item.start, "slow", None)
+                    tempo_value = Event("Tempo Value", item.start, 0, None)
                 elif tempo > DEFAULT_TEMPO_INTERVALS[2].stop:
-                    tempo_style = Event('Tempo Class', item.start, 'fast', None)
-                    tempo_value = Event('Tempo Value', item.start, 59, None)
+                    tempo_style = Event("Tempo Class", item.start, "fast", None)
+                    tempo_value = Event("Tempo Value", item.start, 59, None)
 
                 events.append(tempo_style)
                 events.append(tempo_value)
@@ -362,7 +384,7 @@ def word_to_event(words, word2event):
         if word not in word2event:
             print(f"Warning: Unknown word '{word}' in prompt MIDI, skipping")
             breakpoint()
-        event_name, event_value = word2event.get(word).split('_')
+        event_name, event_value = word2event.get(word).split("_")
         events.append(Event(event_name, None, event_value, None))
     return events
 
@@ -385,18 +407,18 @@ def write_midi(words, word2event, output_path, prompt_path=None):
     temp_tempos = []
 
     for i in range(len(events) - 3):
-        if events[i].name == 'Bar' and i > 0:
-            temp_notes.append('Bar')
-            temp_chords.append('Bar')
-            temp_tempos.append('Bar')
+        if events[i].name == "Bar" and i > 0:
+            temp_notes.append("Bar")
+            temp_chords.append("Bar")
+            temp_tempos.append("Bar")
 
         elif (
-            events[i].name == 'Position'
-            and events[i + 1].name == 'Note Velocity'
-            and events[i + 2].name == 'Note On'
-            and events[i + 3].name == 'Note Duration'
+            events[i].name == "Position"
+            and events[i + 1].name == "Note Velocity"
+            and events[i + 2].name == "Note On"
+            and events[i + 3].name == "Note Duration"
         ):
-            position = int(events[i].value.split('/')[0]) - 1
+            position = int(events[i].value.split("/")[0]) - 1
             velocity_index = int(events[i + 1].value)
             velocity = int(DEFAULT_VELOCITY_BINS[velocity_index])
             pitch = int(events[i + 2].value)
@@ -404,21 +426,21 @@ def write_midi(words, word2event, output_path, prompt_path=None):
             duration = DEFAULT_DURATION_BINS[duration_index]
             temp_notes.append([position, velocity, pitch, duration])
 
-        elif events[i].name == 'Position' and events[i + 1].name == 'Chord':
-            position = int(events[i].value.split('/')[0]) - 1
+        elif events[i].name == "Position" and events[i + 1].name == "Chord":
+            position = int(events[i].value.split("/")[0]) - 1
             temp_chords.append([position, events[i + 1].value])
 
         elif (
-            events[i].name == 'Position'
-            and events[i + 1].name == 'Tempo Class'
-            and events[i + 2].name == 'Tempo Value'
+            events[i].name == "Position"
+            and events[i + 1].name == "Tempo Class"
+            and events[i + 2].name == "Tempo Value"
         ):
-            position = int(events[i].value.split('/')[0]) - 1
-            if events[i + 1].value == 'slow':
+            position = int(events[i].value.split("/")[0]) - 1
+            if events[i + 1].value == "slow":
                 tempo = DEFAULT_TEMPO_INTERVALS[0].start + int(events[i + 2].value)
-            elif events[i + 1].value == 'mid':
+            elif events[i + 1].value == "mid":
                 tempo = DEFAULT_TEMPO_INTERVALS[1].start + int(events[i + 2].value)
-            elif events[i + 1].value == 'fast':
+            elif events[i + 1].value == "fast":
                 tempo = DEFAULT_TEMPO_INTERVALS[2].start + int(events[i + 2].value)
             temp_tempos.append([position, tempo])
 
@@ -429,14 +451,18 @@ def write_midi(words, word2event, output_path, prompt_path=None):
     current_bar = 0
 
     for note in temp_notes:
-        if note == 'Bar':
+        if note == "Bar":
             current_bar += 1
         else:
             position, velocity, pitch, duration = note
             current_bar_st = current_bar * ticks_per_bar
             current_bar_et = (current_bar + 1) * ticks_per_bar
             flags = np.linspace(
-                current_bar_st, current_bar_et, DEFAULT_FRACTION, endpoint=False, dtype=int
+                current_bar_st,
+                current_bar_et,
+                DEFAULT_FRACTION,
+                endpoint=False,
+                dtype=int,
             )
             st = flags[position]
             et = st + duration
@@ -447,14 +473,18 @@ def write_midi(words, word2event, output_path, prompt_path=None):
     if len(temp_chords) > 0:
         current_bar = 0
         for chord in temp_chords:
-            if chord == 'Bar':
+            if chord == "Bar":
                 current_bar += 1
             else:
                 position, value = chord
                 current_bar_st = current_bar * ticks_per_bar
                 current_bar_et = (current_bar + 1) * ticks_per_bar
                 flags = np.linspace(
-                    current_bar_st, current_bar_et, DEFAULT_FRACTION, endpoint=False, dtype=int
+                    current_bar_st,
+                    current_bar_et,
+                    DEFAULT_FRACTION,
+                    endpoint=False,
+                    dtype=int,
                 )
                 st = flags[position]
                 chords.append([st, value])
@@ -463,14 +493,18 @@ def write_midi(words, word2event, output_path, prompt_path=None):
     tempos = []
     current_bar = 0
     for tempo in temp_tempos:
-        if tempo == 'Bar':
+        if tempo == "Bar":
             current_bar += 1
         else:
             position, value = tempo
             current_bar_st = current_bar * ticks_per_bar
             current_bar_et = (current_bar + 1) * ticks_per_bar
             flags = np.linspace(
-                current_bar_st, current_bar_et, DEFAULT_FRACTION, endpoint=False, dtype=int
+                current_bar_st,
+                current_bar_et,
+                DEFAULT_FRACTION,
+                endpoint=False,
+                dtype=int,
             )
             st = flags[position]
             tempos.append([int(st), value])
@@ -522,7 +556,9 @@ def write_midi(words, word2event, output_path, prompt_path=None):
         # Write chords as markers
         if len(temp_chords) > 0:
             for c in chords:
-                midi.markers.append(miditoolkit.midi.containers.Marker(text=c[1], time=c[0]))
+                midi.markers.append(
+                    miditoolkit.midi.containers.Marker(text=c[1], time=c[0])
+                )
 
     # Save file
     midi.dump(output_path)

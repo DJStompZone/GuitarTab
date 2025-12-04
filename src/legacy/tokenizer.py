@@ -1,12 +1,15 @@
 """
 Tokenizer wrapper for different MIDI tokenization schemes.
-Supports both dictionary-based (REMI) and miditok-based (CPWord, MIDILike) approaches.
+Supports:
+- TAB: Guitar tablature with NOTE ON/OFF input and TAB<string,fret> output
+- REMI: Original rhythm-based encoding
+- CPWord/MIDILike: miditok tokenizers
 
 This is the SINGLE SOURCE OF TRUTH for all vocabulary management.
 All other code should use this class instead of loading dictionaries directly.
 """
 
-import pickle
+import json
 from pathlib import Path
 from typing import List, Union, Tuple, Optional, Dict
 from miditok import CPWord, MIDILike, TokenizerConfig
@@ -22,39 +25,77 @@ class MIDITokenizer:
     All code should use this class instead of loading dictionaries directly.
 
     Supports:
+    - TAB: Guitar tablature (NOTE ON/OFF input -> TAB<string,fret> output)
     - REMI: Dictionary-based (our custom implementation)
     - CPWord: miditok Compound Word
     - MIDILike: miditok MIDI-Like
     """
 
-    # Default dictionary paths
-    DEFAULT_DICT_PATH = "./dictionary.pkl"
-    DEFAULT_DICT_CHORD_PATH = "./dictionary_chord.pkl"
+    # Default dictionary paths (JSON format)
+    DEFAULT_DICT_PATH = "./dictionary.json"
+    DEFAULT_DICT_CHORD_PATH = "./dictionary_chord.json"
 
     def __init__(
         self,
-        tokenizer_type: str = "remi",
+        tokenizer_type: str = "tab",
         dictionary_path: str = None,
         use_chords: bool = False,
         vocab_size: int = None,
+        num_strings: int = 6,
+        num_frets: int = 21,
+        max_pitch: int = 109,
+        min_pitch: int = 21,
+        max_time_shift: int = 100,
         **tokenizer_params
     ):
         """
         Initialize tokenizer.
 
         Args:
-            tokenizer_type: One of ["remi", "cpword", "midilike"]
-            dictionary_path: Path to pickle dictionary (for REMI only).
-                           If None, auto-selects based on use_chords.
+            tokenizer_type: One of ["tab", "remi", "cpword", "midilike"]
+            dictionary_path: Path to JSON dictionary (for REMI/TAB).
+                           If None, builds vocabulary dynamically for TAB.
             use_chords: Whether to use chord information
             vocab_size: Vocabulary size (computed from dictionary or tokenizer)
+            num_strings: Number of guitar strings (for TAB)
+            num_frets: Number of frets (for TAB)
+            max_pitch: Maximum MIDI pitch (for TAB)
+            min_pitch: Minimum MIDI pitch (for TAB)
+            max_time_shift: Maximum time shift value (for TAB)
             **tokenizer_params: Additional parameters for miditok tokenizers
         """
         self.tokenizer_type = tokenizer_type.lower()
         self.use_chords = use_chords
 
-        if self.tokenizer_type == "remi":
-            # Auto-select dictionary based on use_chords
+        if self.tokenizer_type == "tab":
+            # Build TAB vocabulary dynamically
+            self.num_strings = num_strings
+            self.num_frets = num_frets
+            self.max_pitch = max_pitch
+            self.min_pitch = min_pitch
+            self.max_time_shift = max_time_shift
+
+            self.input_event2word, self.input_word2event = self._build_input_vocab()
+            self.output_event2word, self.output_word2event = self._build_output_vocab()
+
+            # For compatibility with existing code
+            self.event2word = self.input_event2word
+            self.word2event = self.input_word2event
+
+            self.input_vocab_size = len(self.input_event2word)
+            self.output_vocab_size = len(self.output_event2word)
+            self.vocab_size = self.input_vocab_size  # Default to input vocab size
+
+            self.tokenizer = None
+            self.dictionary_path = dictionary_path
+
+            print(f"TAB tokenizer initialized:")
+            print(f"  Input vocab size: {self.input_vocab_size}")
+            print(f"  Output vocab size: {self.output_vocab_size}")
+            print(f"  TAB tokens: {num_strings} strings × {num_frets} frets = {num_strings * num_frets}")
+
+        elif self.tokenizer_type == "remi":
+            # Load REMI dictionary from JSON
             if dictionary_path is None:
                 dictionary_path = self.DEFAULT_DICT_CHORD_PATH if use_chords else self.DEFAULT_DICT_PATH
 
@@ -64,7 +105,11 @@ class MIDITokenizer:
                     f"Run 'python build_vocabularies.py' to generate dictionaries."
                 )
 
-            self.event2word, self.word2event = pickle.load(open(dictionary_path, "rb"))
+            with open(dictionary_path, 'r') as f:
+                vocab_data = json.load(f)
+
+            self.event2word = vocab_data['event2word']
+            self.word2event = {int(k): v for k, v in vocab_data['word2event'].items()}
             self.vocab_size = len(self.event2word)
             self.tokenizer = None
             self.dictionary_path = dictionary_path
@@ -95,6 +140,124 @@ class MIDITokenizer:
 
         else:
             raise ValueError(f"Unknown tokenizer type: {tokenizer_type}")
+
+    def _build_input_vocab(self) -> Tuple[Dict[str, int], Dict[int, str]]:
+        """
+        Build vocabulary for input sequences (NOTE ON/OFF + TIME SHIFT).
+
+        Returns:
+            Tuple of (event2word, word2event) dictionaries
+        """
+        event2word = {}
+        word2event = {}
+        idx = 0
+
+        # Special tokens
+        for token in ['PAD', 'BOS', 'EOS', 'UNK']:
+            event = f'SPECIAL_{token}'
+            event2word[event] = idx
+            word2event[idx] = event
+            idx += 1
+
+        # NOTE_ON tokens for each pitch
+        for pitch in range(self.min_pitch, self.max_pitch + 1):
+            event = f'NOTE_ON_{pitch}'
+            event2word[event] = idx
+            word2event[idx] = event
+            idx += 1
+
+        # NOTE_OFF tokens for each pitch
+        for pitch in range(self.min_pitch, self.max_pitch + 1):
+            event = f'NOTE_OFF_{pitch}'
+            event2word[event] = idx
+            word2event[idx] = event
+            idx += 1
+
+        # TIME_SHIFT tokens
+        for shift in range(1, self.max_time_shift + 1):
+            event = f'TIME_SHIFT_{shift}'
+            event2word[event] = idx
+            word2event[idx] = event
+            idx += 1
+
+        return event2word, word2event
+
+    def _build_output_vocab(self) -> Tuple[Dict[str, int], Dict[int, str]]:
+        """
+        Build vocabulary for output sequences (TAB<string,fret> + TIME SHIFT).
+
+        Returns:
+            Tuple of (event2word, word2event) dictionaries
+        """
+        event2word = {}
+        word2event = {}
+        idx = 0
+
+        # Special tokens
+        for token in ['PAD', 'BOS', 'EOS', 'UNK']:
+            event = f'SPECIAL_{token}'
+            event2word[event] = idx
+            word2event[idx] = event
+            idx += 1
+
+        # TAB tokens for each string and fret combination
+        for string in range(1, self.num_strings + 1):
+            for fret in range(0, self.num_frets):
+                event = f'TAB_{string}_{fret}'
+                event2word[event] = idx
+                word2event[idx] = event
+                idx += 1
+
+        # TIME_SHIFT tokens
+        for shift in range(1, self.max_time_shift + 1):
+            event = f'TIME_SHIFT_{shift}'
+            event2word[event] = idx
+            word2event[idx] = event
+            idx += 1
+
+        return event2word, word2event
+
+    def save_vocabularies(self, output_dir: str = "."):
+        """
+        Save vocabularies to JSON files for reference.
+
+        Args:
+            output_dir: Directory to save vocabulary files
+        """
+        output_dir = Path(output_dir)
+        output_dir.mkdir(parents=True, exist_ok=True)
+
+        if self.tokenizer_type == "tab":
+            # Save input vocabulary
+            input_vocab_path = output_dir / "vocab_input.json"
+            with open(input_vocab_path, 'w') as f:
+                json.dump({
+                    'event2word': self.input_event2word,
+                    'word2event': self.input_word2event,
+                    'vocab_size': self.input_vocab_size
+                }, f, indent=2)
+            print(f"Saved input vocabulary to {input_vocab_path}")
+
+            # Save output vocabulary
+            output_vocab_path = output_dir / "vocab_output.json"
+            with open(output_vocab_path, 'w') as f:
+                json.dump({
+                    'event2word': self.output_event2word,
+                    'word2event': self.output_word2event,
+                    'vocab_size': self.output_vocab_size
+                }, f, indent=2)
+            print(f"Saved output vocabulary to {output_vocab_path}")
+
+        elif self.tokenizer_type == "remi":
+            # Save REMI vocabulary
+            vocab_path = output_dir / "vocab_remi.json"
+            with open(vocab_path, 'w') as f:
+                json.dump({
+                    'event2word': self.event2word,
+                    'word2event': self.word2event,
+                    'vocab_size': self.vocab_size
+                }, f, indent=2)
+            print(f"Saved REMI vocabulary to {vocab_path}")
 
     @classmethod
     def from_config(cls, data_config) -> "MIDITokenizer":
@@ -193,20 +356,54 @@ class MIDITokenizer:
 
         return compound
 
-    def encode_midi(self, midi_path: str) -> List[int]:
+    def encode_midi(self, midi_path: str, jams_path: str = None) -> Union[List[int], Tuple[List[int], List[int]]]:
         """
         Encode MIDI file to token indices.
 
+        For TAB tokenizer, returns (input_tokens, output_tokens) tuple if jams_path is provided,
+        otherwise returns input_tokens only.
+
         Args:
             midi_path: Path to MIDI file
+            jams_path: Path to JAMS file (required for TAB tokenizer output)
 
         Returns:
-            List of token indices
+            List of token indices or tuple of (input_tokens, output_tokens)
         """
-        # TODO: bad design
-        if self.tokenizer_type == "remi":
+        if self.tokenizer_type == "tab":
+            # Use NOTE ON/OFF + TAB encoding
+            from src.midi_utils import extract_note_on_off_events, extract_tab_events_from_jams
+
+            # Extract input events (NOTE ON/OFF)
+            input_events = extract_note_on_off_events(midi_path)
+            input_words = []
+            for event in input_events:
+                e = f"{event.name}_{event.value}"
+                if e in self.input_event2word:
+                    input_words.append(self.input_event2word[e])
+                else:
+                    # Use UNK token for out-of-vocabulary events
+                    input_words.append(self.input_event2word.get('SPECIAL_UNK', 3))
+
+            # Extract output events (TAB) if JAMS path provided
+            if jams_path:
+                output_events = extract_tab_events_from_jams(jams_path)
+                output_words = []
+                for event in output_events:
+                    e = f"{event.name}_{event.value}"
+                    if e in self.output_event2word:
+                        output_words.append(self.output_event2word[e])
+                    else:
+                        # Use UNK token for out-of-vocabulary events
+                        output_words.append(self.output_event2word.get('SPECIAL_UNK', 3))
+
+                return input_words, output_words
+            else:
+                return input_words
+
+        elif self.tokenizer_type == "remi":
             # Use existing event-based encoding
-            from src.utils.midi_utils import extract_events_from_midi
+            from src.midi_utils import extract_events_from_midi
             events = extract_events_from_midi(midi_path, use_chords=self.use_chords)
 
             words = []
