@@ -5,7 +5,9 @@ name: "dadagp_debug"
 # Data paths
 data_dir: "DadaGP-v1.1"
 token_pattern: "**/*.tokens.txt"
-selected_files_json: null  # null = use all files, or path to JSON file with .gp file names
+selected_files_json: selected_files.json  # null = use all files, or path to JSON file with .gp file names
+
+max_files: 10  # Use only 5 files
 
 # Dataset parameters
 max_sequence_length: 512
@@ -24,5 +26,3 @@ batch_size: 4
 num_workers: 0  # Disable multiprocessing for debugging
 pin_memory: false
 
-# Limit number of files for debugging
-max_files: 5  # Use only 5 files

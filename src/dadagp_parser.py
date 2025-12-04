@@ -223,6 +223,7 @@ def compute_pitch(string: int, fret: int, downtune: int = 0) -> int:
     Returns:
         MIDI pitch
     """
+    # TODO: remove this
     if string < 1 or string > 6:
         raise ValueError(f"Invalid string number: {string}")
 

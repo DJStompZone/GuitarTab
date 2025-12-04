@@ -130,17 +130,28 @@ class FrettingTransformer(nn.Module):
         labels: Optional[torch.Tensor] = None
     ):
         """
-        Forward pass.
+        Forward pass through T5 encoder-decoder model.
 
         Args:
-            input_ids: Input token IDs [batch_size, seq_len]
-            attention_mask: Input attention mask
-            decoder_input_ids: Decoder input token IDs (for teacher forcing)
-            decoder_attention_mask: Decoder attention mask
-            labels: Target labels for loss computation
+            input_ids: [B, L_enc] - Encoder input token IDs
+            attention_mask: [B, L_enc] - Encoder padding mask (1=real, 0=pad)
+            decoder_input_ids: [B, L_dec] - Decoder input token IDs (for teacher forcing)
+            decoder_attention_mask: [B, L_dec] - Decoder padding mask (1=real, 0=pad)
+                                     Note: Causal masking is applied automatically by T5
+            labels: [B, L_dec] - Target labels for loss computation
 
         Returns:
-            Model outputs with loss and logits
+            Model outputs (Seq2SeqLMOutput):
+            - loss: scalar - Cross-entropy loss (if labels provided)
+            - logits: [B, L_dec, output_vocab_size] - Output predictions
+            - past_key_values: Cached key/value states for generation
+            - encoder_last_hidden_state: [B, L_enc, d_model] - Final encoder states
+            - decoder_hidden_states: Tuple of [B, L_dec, d_model] for each layer
+
+        Note:
+            - Encoder processes input_ids with bidirectional attention
+            - Decoder attends to encoder outputs (cross-attention) and uses causal self-attention
+            - Output vocab size differs from input vocab size (886 vs 760)
         """
         return self.model(
             input_ids=input_ids,
@@ -159,17 +170,24 @@ class FrettingTransformer(nn.Module):
         **kwargs
     ):
         """
-        Generate output sequences.
+        Generate output sequences autoregressively (for inference).
 
         Args:
-            input_ids: Input token IDs
-            attention_mask: Input attention mask
-            max_length: Maximum generation length
-            num_beams: Number of beams for beam search
-            **kwargs: Additional generation arguments
+            input_ids: [B, L_enc] - Encoder input token IDs
+            attention_mask: [B, L_enc] - Encoder padding mask
+            max_length: Maximum generation length (absolute, not relative)
+            num_beams: Number of beams for beam search (1 = greedy decoding)
+            **kwargs: Additional generation arguments (temperature, top_k, top_p, etc.)
 
         Returns:
-            Generated token IDs
+            [B * num_beams, L_gen] - Generated token IDs
+            where L_gen <= max_length
+
+        Note:
+            - Uses causal decoding: generates one token at a time
+            - Starts with BOS token (decoder_start_token_id)
+            - Stops at EOS token or max_length
+            - For beam search (num_beams > 1), batch dimension expands
         """
         return self.model.generate(
             input_ids=input_ids,
