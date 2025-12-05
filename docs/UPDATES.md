@@ -13,7 +13,4 @@ python inference.py data=test_split
 ```
 
 ## Data and tokenization
-- 
-
-
-- Directly use 
+- TODO
