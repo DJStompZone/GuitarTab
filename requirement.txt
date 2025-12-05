@@ -1,4 +1,4 @@
-guitarpro
+PyGuitarPro==0.6
 jams
 mido
 tqdm

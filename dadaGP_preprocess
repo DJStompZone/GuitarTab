@@ -1,0 +1,4 @@
+python get_dataset.py
+
+cd gp2jams
+python process_guitrapro.py

@@ -46,5 +46,5 @@ def build_dataset(root_A, dataset_root):
 
 # Example usage
 ROOT_A = "DadaGP-v1.1"
-DATASET_ROOT = "Dataset_new"   # your dataset folder
+DATASET_ROOT = "Dataset"   # your dataset folder
 build_dataset(ROOT_A, DATASET_ROOT)
