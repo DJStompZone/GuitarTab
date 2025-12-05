@@ -6,10 +6,14 @@
 ln -s ...
 
 # 2. Train
-python train.py data=train_split
+# only 1000 files
+python train.py data=selected data.max_files=1000
+
+# unlimited (all selected files)
+python train.py data=selected
 
 # 3. Test and evalutation
-python inference.py data=test_split
+python inference.py +checkpoint_path=./outputs/<exp_dir>/best_model.pt
 ```
 
 ## Data and tokenization
