@@ -1,0 +1,19 @@
+# Main configuration file for Fretting-Transformer training
+
+defaults:
+  - model: t5_small
+  - data: dadagp
+  - training: default
+  - _self_
+
+# Experiment settings
+seed: 42
+exp: ${now:%Y-%m-%d_%H-%M}
+experiment_name: ${exp}
+output_dir: "outputs/${experiment_name}"
+
+# Weights & Biases (optional)
+wandb:
+  enabled: false
+  project: "guitar-tablature"
+  entity: null

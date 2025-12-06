@@ -2,10 +2,12 @@
 
 ## Installation
 ```
-conda create --name MuiscFinal python==3.9.25
-conda activate MuiscFinal
+conda create --name guitar-tab python==3.10
+conda activate guitar-tab
 pip install -r requirement.txt
 ```
+
+## Check [docs/UPDATES.md](docs/UPDATES.md) for new documentation
 
 ## Codebase
 ```

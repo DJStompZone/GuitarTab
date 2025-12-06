@@ -1,0 +1,43 @@
+# Training hyperparameters
+
+# Optimizer (Adafactor as per paper)
+optimizer:
+  name: "adafactor"
+  lr: 1e-3
+  weight_decay: 0.0
+  scale_parameter: true
+  relative_step: false
+  warmup_init: false
+
+# Learning rate scheduler
+scheduler:
+  name: "linear_warmup"
+  num_warmup_steps: 1000
+  num_training_steps: 50000  # Will be computed based on dataset size
+
+# Training settings
+num_epochs: 10
+max_steps: null  # null = use num_epochs
+gradient_accumulation_steps: 1
+max_grad_norm: 1.0
+
+# Checkpointing
+save_steps: 1000
+eval_steps: 500
+logging_steps: 100
+save_total_limit: 3
+checkpoint_every_n_epochs: 5  # Save checkpoint every N epochs (0 = only save best)
+
+# Mixed precision
+fp16: false
+bf16: false
+
+# Evaluation
+eval_batch_size: 64
+
+# Autoregressive (AR) evaluation - computes real accuracy via generation
+ar_eval_enabled: true           # Whether to do AR eval
+ar_eval_frequency: 5            # Run AR eval every N epochs (0 = never)
+ar_eval_max_batches: 10         # Limit batches for speed (null = all)
+ar_eval_max_length: 1024        # Max generation length
+ar_eval_num_beams: 1            # Beam search beams (1 = greedy)
