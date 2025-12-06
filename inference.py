@@ -29,7 +29,7 @@ def load_checkpoint(checkpoint_path: str, model, device: str):
     return model
 
 
-@hydra.main(version_base=None, config_path="configs", config_name="config")
+@hydra.main(version_base=None, config_path="configs", config_name="inference")
 def main(cfg: DictConfig):
     """Run inference and compute accuracy."""
 
@@ -93,7 +93,7 @@ def main(cfg: DictConfig):
     print(f"Evaluating on {cfg.data.selected_files_json}")
     print("=" * 80)
 
-    metrics = generate_and_compute_accuracy(
+    metrics, (input_ids, targets, predictions) = generate_and_compute_accuracy(
         model=model,
         dataloader=dataloader,
         output_vocab=dataset.output_vocab,
@@ -102,6 +102,15 @@ def main(cfg: DictConfig):
         num_beams=cfg.training.get('ar_eval_num_beams', 1),
         max_batches=cfg.get('max_eval_batches', None)  # None = all batches
     )
+
+    # Save predictions and targets
+    input_ids_file = cfg.output_dir / "input_ids.pt"
+    targets_file = cfg.output_dir / "targets.pt"
+    predictions_file = cfg.output_dir / "predictions.pt"
+    torch.save(input_ids, input_ids_file)
+    torch.save(targets, targets_file)
+    torch.save(predictions, predictions_file)
+
 
     print(f"\nResults:")
     print(f"  Token Accuracy:  {metrics.token_accuracy:.2%}")

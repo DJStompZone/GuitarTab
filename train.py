@@ -404,17 +404,15 @@ def main(cfg: DictConfig):
         if cfg.training.get('ar_eval_enabled', False) and cfg.training.get('ar_eval_frequency', 0) > 0:
             if epoch % cfg.training.ar_eval_frequency == 0:
                 print(f"\nRunning AR evaluation (generation + accuracy)...")
-                ar_result = generate_and_compute_accuracy(
+                ar_metrics, (input_ids, targets, predictions) = generate_and_compute_accuracy(
                     model=model,
                     dataloader=val_loader,
                     output_vocab=dataset.output_vocab,
                     device=device,
                     max_length=cfg.training.get('ar_eval_max_length', 1024),
                     num_beams=cfg.training.get('ar_eval_num_beams', 1),
-                    max_batches=cfg.training.get('ar_eval_max_batches', None),
-                    return_predictions=True
+                    max_batches=cfg.training.get('ar_eval_max_batches', None)
                 )
-                ar_metrics, (predictions, targets) = ar_result
                 print(f"AR Metrics: {ar_metrics}")
 
                 # Save generated samples
@@ -484,17 +482,15 @@ def main(cfg: DictConfig):
     # Final AR evaluation on test set
     if cfg.training.get('ar_eval_enabled', False):
         print(f"\nFinal AR evaluation on test set...")
-        test_ar_result = generate_and_compute_accuracy(
+        test_ar_metrics, (input_ids, targets, predictions) = generate_and_compute_accuracy(
             model=model,
             dataloader=test_loader,
             output_vocab=dataset.output_vocab,
             device=device,
             max_length=cfg.training.get('ar_eval_max_length', 1024),
             num_beams=cfg.training.get('ar_eval_num_beams', 1),
-            max_batches=None,  # Use all batches for final evaluation
-            return_predictions=True
+            max_batches=None  # Use all batches for final evaluation
         )
-        test_ar_metrics, (predictions, targets) = test_ar_result
         print(f"\nTest Set AR Metrics:")
         print(f"  Token Accuracy:  {test_ar_metrics.token_accuracy:.2%}")
         print(f"  Pitch Accuracy:  {test_ar_metrics.pitch_accuracy:.2%}")

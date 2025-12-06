@@ -17,7 +17,7 @@ class TabAccuracyMetrics:
 
     # Note-level accuracy (only on NOTE_ON positions)
     pitch_accuracy: float  # % of NOTE_ON with correct pitch
-    tab_accuracy: float    # % of NOTE_ON with correct (string, fret)
+    tab_accuracy: float  # % of NOTE_ON with correct (string, fret)
 
     # Counts
     total_tokens: int
@@ -33,10 +33,14 @@ class TabAccuracyMetrics:
 
 
 def compute_tablature_accuracy(
+<<<<<<< HEAD
     predictions: torch.Tensor,
     targets: torch.Tensor,
     output_vocab,
     # pad_id: int = -100 # 0
+=======
+    predictions: torch.Tensor, targets: torch.Tensor, output_vocab, pad_id: int = 0
+>>>>>>> 09d4c4180b96ba2ad91423d206d589f6fc4531fc
 ) -> TabAccuracyMetrics:
     """
     Compute accuracy metrics for tablature transcription.
@@ -72,8 +76,7 @@ def compute_tablature_accuracy(
 
     # Note-level accuracy (only NOTE_ON positions)
     note_positions = [
-        i for i, token in enumerate(target_tokens)
-        if token.startswith("NOTE_ON_")
+        i for i, token in enumerate(target_tokens) if token.startswith("NOTE_ON_")
     ]
 
     if len(note_positions) == 0:
@@ -82,7 +85,7 @@ def compute_tablature_accuracy(
             pitch_accuracy=0.0,
             tab_accuracy=0.0,
             total_tokens=total_tokens,
-            total_notes=0
+            total_notes=0,
         )
 
     # Pitch accuracy: check if pitch matches
@@ -117,7 +120,7 @@ def compute_tablature_accuracy(
         pitch_accuracy=pitch_accuracy,
         tab_accuracy=tab_accuracy,
         total_tokens=total_tokens,
-        total_notes=len(note_positions)
+        total_notes=len(note_positions),
     )
 
 
@@ -129,8 +132,7 @@ def generate_and_compute_accuracy(
     max_length: int = 1024,
     num_beams: int = 1,
     max_batches: Optional[int] = None,
-    return_predictions: bool = False
-) -> tuple[TabAccuracyMetrics, Optional[tuple[torch.Tensor, torch.Tensor]]]:
+) -> tuple[TabAccuracyMetrics, tuple[torch.Tensor, torch.Tensor, torch.Tensor]]:
     """
     Generate sequences autoregressively and compute accuracy.
 
@@ -145,19 +147,21 @@ def generate_and_compute_accuracy(
         return_predictions: If True, return (metrics, (predictions, targets))
 
     Returns:
-        If return_predictions=False: metrics only
-        If return_predictions=True: (metrics, (predictions, targets))
+        (metrics, (input_ids, targets, predictions))
     """
     model.eval()
 
     all_predictions = []
+    all_input_ids = []
     all_targets = []
 
     total_batches = max_batches if max_batches is not None else len(dataloader)
     print("max_batches", max_batches)
 
     with torch.no_grad():
-        pbar = tqdm(enumerate(dataloader), total=total_batches, desc="Generating sequences")
+        pbar = tqdm(
+            enumerate(dataloader), total=total_batches, desc="Generating sequences"
+        )
         for batch_idx, batch in pbar:
 
             if max_batches is not None and batch_idx >= max_batches:
@@ -179,6 +183,11 @@ def generate_and_compute_accuracy(
                 num_beams=num_beams,
                 pad_token_id=output_vocab.pad_id,
                 eos_token_id=output_vocab.eos_id
+<<<<<<< HEAD
+=======
+                if hasattr(output_vocab, "eos_id")
+                else None,
+>>>>>>> 09d4c4180b96ba2ad91423d206d589f6fc4531fc
             )
 
             # remove BOS
@@ -197,28 +206,74 @@ def generate_and_compute_accuracy(
                     (B, target_len - gen_len),
                     output_vocab.pad_id,
                     dtype=generated.dtype,
-                    device=generated.device
+                    device=generated.device,
                 )
+<<<<<<< HEAD
                 generated = torch.cat([generated, pad], dim=1)
+=======
+                generated = torch.cat([generated, padding], dim=1)
+            elif gen_len > max_length:
+                generated = generated[:, :max_length]
 
+            # Pad or trim targets to max_length
+            if target_len < max_length:
+                padding = torch.full(
+                    (B, max_length - target_len),
+                    output_vocab.pad_id,
+                    dtype=target_ids.dtype,
+                    device=target_ids.device,
+                )
+                target_ids = torch.cat([target_ids, padding], dim=1)
+            elif target_len > max_length:
+                target_ids = target_ids[:, :max_length]
+>>>>>>> 09d4c4180b96ba2ad91423d206d589f6fc4531fc
+
+            # Note: input_ids also need padding for uniform concatenation
+            # However, we keep them as-is since they don't need to match max_length
+            # (they're already padded within batch by collate_fn)
+
+            all_input_ids.append(input_ids)
             all_predictions.append(generated)
             all_targets.append(target_ids)
             
             # Update progress bar with current batch info
-            pbar.set_postfix({"batch_size": B, "gen_len": gen_len, "target_len": target_len})
+            pbar.set_postfix(
+                {"batch_size": B, "gen_len": gen_len, "target_len": target_len}
+            )
 
     # Concatenate all batches
     predictions = torch.cat(all_predictions, dim=0)
     targets = torch.cat(all_targets, dim=0)
 
+<<<<<<< HEAD
     # Compute accuracy
     metrics = compute_tablature_accuracy(
         predictions=predictions,
         targets=targets,
         output_vocab=output_vocab
+=======
+    # Pad input_ids to uniform length across batches
+    max_input_len = max(inp.shape[1] for inp in all_input_ids)
+    padded_inputs = []
+    for inp in all_input_ids:
+        if inp.shape[1] < max_input_len:
+            # Assume input uses pad_id=0 (standard for input vocab)
+            padding = torch.zeros(
+                (inp.shape[0], max_input_len - inp.shape[1]),
+                dtype=inp.dtype,
+                device=inp.device
+            )
+            inp = torch.cat([inp, padding], dim=1)
+        padded_inputs.append(inp)
+    input_ids = torch.cat(padded_inputs, dim=0)
+
+    # Compute metrics
+    metrics = compute_tablature_accuracy(
+        predictions=predictions,
+        targets=targets,
+        output_vocab=output_vocab,
+        pad_id=output_vocab.pad_id,
+>>>>>>> 09d4c4180b96ba2ad91423d206d589f6fc4531fc
     )
 
-    if return_predictions:
-        return metrics, (predictions, targets)
-    else:
-        return metrics
+    return metrics, (input_ids, targets, predictions)
