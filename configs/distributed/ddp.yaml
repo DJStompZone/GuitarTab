@@ -1,0 +1,20 @@
+# Distributed Data Parallel (DDP) Configuration
+# For multi-GPU training on a single node
+
+# Backend for distributed communication
+# Options: "nccl" (GPU), "gloo" (CPU/GPU), "mpi"
+backend: "nccl"
+
+# Timeout for distributed operations (seconds)
+# Increase if you experience timeout errors on slow networks
+timeout: 1800  # 30 minutes
+
+# Find unused parameters (for debugging)
+# Set to true if you have unused parameters in forward pass
+# Note: Enabling this adds overhead, only use for debugging
+find_unused_parameters: false
+
+# Gradient as bucket view (memory optimization)
+# Improves performance by avoiding gradient copying
+# Set to false only if you experience issues
+gradient_as_bucket_view: true

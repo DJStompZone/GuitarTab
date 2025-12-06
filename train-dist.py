@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 """
-Training script for Fretting-Transformer using Hydra configuration.
+Distributed training script for Fretting-Transformer using PyTorch DDP.
+
+This is the multi-GPU training version. For single-GPU training, use train.py.
 """
 
 import os
@@ -12,41 +14,53 @@ import numpy as np
 import torch
 import torch.nn as nn
 from torch.utils.data import DataLoader, random_split
+from torch.utils.data.distributed import DistributedSampler
+from torch.nn.parallel import DistributedDataParallel as DDP
 from tqdm import tqdm
 import hydra
 from transformers.modeling_outputs import Seq2SeqLMOutput
 from omegaconf import DictConfig, OmegaConf
 from functools import partial
+from typing import Optional, Dict
 
 from src.tab_dataset import TabDataset
 from src.model import FrettingTransformer
 from src.metrics import generate_and_compute_accuracy
 from src.dataloader import create_dataset, create_dataloader
 from src.training_logger import TrainingLogger, save_generated_samples
-
+from src.distributed_utils import (
+    setup_distributed,
+    cleanup_distributed,
+    is_main_process,
+    get_rank,
+    get_world_size,
+    barrier,
+    reduce_dict
+)
 
 from typing_extensions import TypeAlias
 from src.tab_dataset import TabDatasetBatchInput
 
 
-def set_seed(seed: int):
-    """Set random seed for reproducibility."""
-    random.seed(seed)
-    np.random.seed(seed)
-    torch.manual_seed(seed)
+def set_seed(seed: int, rank: int = 0):
+    """Set random seed for reproducibility (rank-aware for distributed training)."""
+    random.seed(seed + rank)
+    np.random.seed(seed + rank)
+    torch.manual_seed(seed + rank)
     if torch.cuda.is_available():
-        torch.cuda.manual_seed_all(seed)
+        torch.cuda.manual_seed_all(seed + rank)
 
 
-def create_dataloaders(cfg: DictConfig) -> tuple[DataLoader, DataLoader, DataLoader, TabDataset]:
+def create_dataloaders(cfg: DictConfig, dist_config: Dict) -> tuple[DataLoader, DataLoader, DataLoader, TabDataset, Optional[DistributedSampler]]:
     """
-    Create train/val/test dataloaders from pre-split file lists.
+    Create train/val/test dataloaders from pre-split file lists with distributed sampling.
 
     Args:
         cfg: Hydra config
+        dist_config: Distributed training configuration dict
 
     Returns:
-        Tuple of (train_loader, val_loader, test_loader, train_dataset)
+        Tuple of (train_loader, val_loader, test_loader, train_dataset, train_sampler)
     """
     selected_file = cfg.data.selected_files_json
 
@@ -130,13 +144,40 @@ def create_dataloaders(cfg: DictConfig) -> tuple[DataLoader, DataLoader, DataLoa
 
         print(f"Dataset split (segment-level): train={len(train_dataset)}, val={len(val_dataset)}, test={len(test_dataset)}")
 
-    # Create dataloaders
+    # Create distributed samplers for all splits
+    rank = dist_config['rank']
+    world_size = dist_config['world_size']
+
+    train_sampler = DistributedSampler(
+        train_dataset if isinstance(train_dataset, TabDataset) else train_dataset.dataset,
+        num_replicas=world_size,
+        rank=rank,
+        shuffle=True,
+        seed=cfg.seed
+    )
+
+    val_sampler = DistributedSampler(
+        val_dataset if isinstance(val_dataset, TabDataset) else val_dataset.dataset,
+        num_replicas=world_size,
+        rank=rank,
+        shuffle=False
+    )
+
+    test_sampler = DistributedSampler(
+        test_dataset if isinstance(test_dataset, TabDataset) else test_dataset.dataset,
+        num_replicas=world_size,
+        rank=rank,
+        shuffle=False
+    )
+
+    # Create dataloaders with samplers
     train_loader = create_dataloader(
         train_dataset if isinstance(train_dataset, TabDataset) else train_dataset.dataset,
         batch_size=cfg.data.batch_size,
-        shuffle=True,
+        shuffle=False,  # Sampler handles shuffling
         num_workers=cfg.data.num_workers,
-        pin_memory=cfg.data.pin_memory
+        pin_memory=cfg.data.pin_memory,
+        sampler=train_sampler
     )
 
     val_loader = create_dataloader(
@@ -144,7 +185,8 @@ def create_dataloaders(cfg: DictConfig) -> tuple[DataLoader, DataLoader, DataLoa
         batch_size=cfg.training.eval_batch_size,
         shuffle=False,
         num_workers=cfg.data.num_workers,
-        pin_memory=cfg.data.pin_memory
+        pin_memory=cfg.data.pin_memory,
+        sampler=val_sampler
     )
 
     test_loader = create_dataloader(
@@ -152,12 +194,13 @@ def create_dataloaders(cfg: DictConfig) -> tuple[DataLoader, DataLoader, DataLoa
         batch_size=cfg.training.eval_batch_size,
         shuffle=False,
         num_workers=cfg.data.num_workers,
-        pin_memory=cfg.data.pin_memory
+        pin_memory=cfg.data.pin_memory,
+        sampler=test_sampler
     )
 
     # Return train_dataset for vocabulary access
     return_dataset = train_dataset if isinstance(train_dataset, TabDataset) else train_dataset.dataset
-    return train_loader, val_loader, test_loader, return_dataset
+    return train_loader, val_loader, test_loader, return_dataset, train_sampler
 
 
 
@@ -194,15 +237,24 @@ def train_epoch(
     device: str,
     epoch: int,
     cfg: DictConfig,
+    sampler: Optional[DistributedSampler] = None,
+    dist_config: Optional[Dict] = None,
 ):
-    """Train for one epoch."""
+    """Train for one epoch with distributed training support."""
     model.train()
+
+    # Set epoch for DistributedSampler (ensures different shuffle each epoch)
+    if sampler is not None:
+        sampler.set_epoch(epoch)
+
     total_loss = 0
     num_batches = 0
 
-    pbar: tqdm[TabDatasetBatchInput] = tqdm(train_loader, desc=f"Epoch {epoch}")
+    # Only show progress bar on main process
+    is_main = dist_config is not None and dist_config['is_main_process']
+    iterator = tqdm(train_loader, desc=f"Epoch {epoch}") if is_main else train_loader
 
-    for step, batch in enumerate(pbar):
+    for step, batch in enumerate(iterator):
         # Move to device
         # Shapes from DataLoader (collate_fn output):
         #   input_ids: [B, L_enc] - Encoder input token IDs
@@ -253,22 +305,33 @@ def train_epoch(
         total_loss += loss.item()
         num_batches += 1
 
-        # Update progress bar
-        pbar.set_postfix({"loss": loss.item()})
+        # Update progress bar (main process only)
+        if is_main and hasattr(iterator, 'set_postfix'):
+            iterator.set_postfix({"loss": loss.item()})
 
     avg_loss = total_loss / num_batches
+
+    # Reduce metrics across all GPUs
+    if dist_config is not None:
+        metrics = reduce_dict({'loss': avg_loss})
+        avg_loss = metrics['loss']
+
     return avg_loss
 
 
-def evaluate(model: FrettingTransformer, val_loader: DataLoader, device: str):
-    """Evaluate model."""
+def evaluate(model: FrettingTransformer, val_loader: DataLoader, device: str, dist_config: Optional[Dict] = None):
+    """Evaluate model with distributed training support."""
     model.eval()
     total_loss = 0
     num_batches = 0
 
+    # Only show progress bar on main process
+    is_main = dist_config is not None and dist_config['is_main_process']
+
     with torch.no_grad():
         batch: TabDatasetBatchInput
-        for batch in tqdm(val_loader, desc="Evaluating"):
+        iterator = tqdm(val_loader, desc="Evaluating") if is_main else val_loader
+        for batch in iterator:
             # Move to device
             # Shapes: [B, L_enc], [B, L_enc], [B, L_dec], [B, L_dec]
             input_ids = batch["input_ids"].to(device)
@@ -295,46 +358,72 @@ def evaluate(model: FrettingTransformer, val_loader: DataLoader, device: str):
             num_batches += 1
 
     avg_loss = total_loss / num_batches
+
+    # Reduce metrics across all GPUs
+    if dist_config is not None:
+        metrics = reduce_dict({'loss': avg_loss})
+        avg_loss = metrics['loss']
+
     return avg_loss
 
 
 @hydra.main(version_base=None, config_path="configs", config_name="config")
 def main(cfg: DictConfig):
-    """Main training function."""
-    print("=" * 80)
-    print("Fretting-Transformer Training")
-    print("=" * 80)
-    # print("\nConfiguration:")
-    # print(OmegaConf.to_yaml(cfg))
+    """Main distributed training function."""
+    # 1. Setup distributed training
+    dist_config = setup_distributed()
+    rank = dist_config['rank']
+    local_rank = dist_config['local_rank']
+    world_size = dist_config['world_size']
+    is_main = dist_config['is_main_process']
 
-    # Set seed
-    set_seed(cfg.seed)
+    # 2. Print only on main process
+    if is_main:
+        print("=" * 80)
+        print("Fretting-Transformer Distributed Training")
+        print("=" * 80)
+        print(f"Distributed Training: {world_size} GPUs")
+        print(f"Rank: {rank}, Local Rank: {local_rank}")
 
-    # Device
-    device = "cuda" if torch.cuda.is_available() else "cpu"
-    print(f"\nUsing device: {device}")
+    # 3. Set seed (rank-aware)
+    set_seed(cfg.seed, rank)
 
-    # Create output directory
-    output_dir = Path(cfg.output_dir)
-    output_dir.mkdir(parents=True, exist_ok=True)
+    # 4. Set device to local GPU
+    if torch.cuda.is_available():
+        torch.cuda.set_device(local_rank)
+        device = f"cuda:{local_rank}"
+    else:
+        device = "cpu"
 
-    # Save config to output directory
-    config_path = output_dir / "config.yaml"
-    OmegaConf.save(cfg, config_path)
-    print(f"Saved config to {config_path}")
+    if is_main:
+        print(f"\nUsing device: {device}")
 
-    # Initialize training logger
-    logger = TrainingLogger(log_file=output_dir / "training_log.json")
-    print(f"Logging to {output_dir / 'training_log.json'}")
+    # 5. Create output directory (main process only)
+    if is_main:
+        output_dir = Path(cfg.output_dir)
+        output_dir.mkdir(parents=True, exist_ok=True)
+        config_path = output_dir / "config.yaml"
+        OmegaConf.save(cfg, config_path)
+        print(f"Saved config to {config_path}")
 
-    # Create dataloaders
-    train_loader, val_loader, test_loader, dataset = create_dataloaders(cfg)
+        # Initialize training logger
+        logger = TrainingLogger(log_file=output_dir / "training_log.json")
+        print(f"Logging to {output_dir / 'training_log.json'}")
+    else:
+        output_dir = Path(cfg.output_dir)  # Non-main processes need the path
+
+    # Barrier to ensure output dir exists before proceeding
+    barrier()
+
+    # 6. Create dataloaders with distributed samplers
+    train_loader, val_loader, test_loader, dataset, train_sampler = create_dataloaders(cfg, dist_config)
 
     # Get vocabulary sizes
     input_vocab_size, output_vocab_size = dataset.get_vocab_sizes()
 
-    # Create model
-    print("\nInitializing model...")
+    # 7. Create model
+    if is_main:
+        print("\nInitializing model...")
     model = FrettingTransformer(
         input_vocab_size=input_vocab_size,
         output_vocab_size=output_vocab_size,
@@ -342,42 +431,58 @@ def main(cfg: DictConfig):
     )
     model = model.to(device)
 
-    # Create optimizer
+    # 8. Wrap model with DDP
+    model = DDP(
+        model,
+        device_ids=[local_rank],
+        output_device=local_rank,
+        find_unused_parameters=cfg.distributed.find_unused_parameters
+    )
+
+    # 9. Create optimizer (AFTER DDP wrapping!)
     optimizer = create_optimizer(model, cfg)
 
-    # Training loop
-    print("\nStarting training...")
+    # 10. Training loop
+    if is_main:
+        print("\nStarting training...")
     best_val_loss = float("inf")
 
     for epoch in range(1, cfg.training.num_epochs + 1):
-        print(f"\n{'=' * 80}")
-        print(f"Epoch {epoch}/{cfg.training.num_epochs}")
-        print(f"{'=' * 80}")
+        if is_main:
+            print(f"\n{'=' * 80}")
+            print(f"Epoch {epoch}/{cfg.training.num_epochs}")
+            print(f"{'=' * 80}")
 
         # Train
-        train_loss = train_epoch(model, train_loader, optimizer, device, epoch, cfg)
-        print(f"Train loss: {train_loss:.4f}")
+        train_loss = train_epoch(model, train_loader, optimizer, device, epoch, cfg, train_sampler, dist_config)
+
+        if is_main:
+            print(f"Train loss: {train_loss:.4f}")
 
         # Evaluate (teacher forcing loss)
-        val_loss = evaluate(model, val_loader, device)
-        print(f"Val loss: {val_loss:.4f}")
+        val_loss = evaluate(model, val_loader, device, dist_config)
 
-        # Log epoch metrics
-        logger.log_epoch(epoch=epoch, train_loss=train_loss, val_loss=val_loss)
+        if is_main:
+            print(f"Val loss: {val_loss:.4f}")
+            logger.log_epoch(epoch=epoch, train_loss=train_loss, val_loss=val_loss)
 
-        # Autoregressive evaluation (real accuracy)
-        if cfg.training.get('ar_eval_enabled', False) and cfg.training.get('ar_eval_frequency', 0) > 0:
+        # Autoregressive evaluation (real accuracy) - main process only
+        if is_main and cfg.training.get('ar_eval_enabled', False) and cfg.training.get('ar_eval_frequency', 0) > 0:
             if epoch % cfg.training.ar_eval_frequency == 0:
                 print(f"\nRunning AR evaluation (generation + accuracy)...")
-                ar_metrics, (input_ids, targets, predictions) = generate_and_compute_accuracy(
-                    model=model,
+                # Need to unwrap DDP model for generation
+                unwrapped_model = model.module
+                ar_result = generate_and_compute_accuracy(
+                    model=unwrapped_model,
                     dataloader=val_loader,
                     output_vocab=dataset.output_vocab,
                     device=device,
                     max_length=cfg.training.get('ar_eval_max_length', 1024),
                     num_beams=cfg.training.get('ar_eval_num_beams', 1),
-                    max_batches=cfg.training.get('ar_eval_max_batches', None)
+                    max_batches=cfg.training.get('ar_eval_max_batches', None),
+                    return_predictions=True
                 )
+                ar_metrics, (predictions, targets) = ar_result
                 print(f"AR Metrics: {ar_metrics}")
 
                 # Save generated samples
@@ -400,14 +505,18 @@ def main(cfg: DictConfig):
                     total_notes=ar_metrics.total_notes
                 )
 
-        # Save best checkpoint
-        if val_loss < best_val_loss:
+        # Save best checkpoint (main process only)
+        if is_main and val_loss < best_val_loss:
             best_val_loss = val_loss
             checkpoint_path = output_dir / "best_model.pt"
+
+            # Unwrap DDP model for saving
+            model_state_dict = model.module.state_dict()
+
             torch.save(
                 {
                     "epoch": epoch,
-                    "model_state_dict": model.state_dict(),
+                    "model_state_dict": model_state_dict,
                     "optimizer_state_dict": optimizer.state_dict(),
                     "train_loss": train_loss,
                     "val_loss": val_loss,
@@ -417,14 +526,18 @@ def main(cfg: DictConfig):
             )
             print(f"Saved best model to {checkpoint_path}")
 
-        # Save checkpoint every N epochs
+        # Save checkpoint every N epochs (main process only)
         checkpoint_every_n = cfg.training.get('checkpoint_every_n_epochs', 0)
-        if checkpoint_every_n > 0 and epoch % checkpoint_every_n == 0:
+        if is_main and checkpoint_every_n > 0 and epoch % checkpoint_every_n == 0:
             checkpoint_path = output_dir / f"checkpoint_epoch_{epoch}.pt"
+
+            # Unwrap DDP model for saving
+            model_state_dict = model.module.state_dict()
+
             torch.save(
                 {
                     "epoch": epoch,
-                    "model_state_dict": model.state_dict(),
+                    "model_state_dict": model_state_dict,
                     "optimizer_state_dict": optimizer.state_dict(),
                     "train_loss": train_loss,
                     "val_loss": val_loss,
@@ -434,28 +547,36 @@ def main(cfg: DictConfig):
             )
             print(f"Saved checkpoint to {checkpoint_path}")
 
-    # Final evaluation on test set
-    print("\n" + "=" * 80)
-    print("Final evaluation on test set")
-    print("=" * 80)
-    test_loss = evaluate(model, test_loader, device)
-    print(f"Test loss: {test_loss:.4f}")
+        # Barrier before next epoch
+        barrier()
 
-    # Log test loss
-    logger.log_test(test_loss=test_loss)
+    # 11. Final evaluation on test set (main process only)
+    if is_main:
+        print("\n" + "=" * 80)
+        print("Final evaluation on test set")
+        print("=" * 80)
 
-    # Final AR evaluation on test set
-    if cfg.training.get('ar_eval_enabled', False):
+    test_loss = evaluate(model, test_loader, device, dist_config)
+
+    if is_main:
+        print(f"Test loss: {test_loss:.4f}")
+        logger.log_test(test_loss=test_loss)
+
+    # Final AR evaluation on test set (main process only)
+    if is_main and cfg.training.get('ar_eval_enabled', False):
         print(f"\nFinal AR evaluation on test set...")
-        test_ar_metrics, (input_ids, targets, predictions) = generate_and_compute_accuracy(
-            model=model,
+        unwrapped_model = model.module
+        test_ar_result = generate_and_compute_accuracy(
+            model=unwrapped_model,
             dataloader=test_loader,
             output_vocab=dataset.output_vocab,
             device=device,
             max_length=cfg.training.get('ar_eval_max_length', 1024),
             num_beams=cfg.training.get('ar_eval_num_beams', 1),
-            max_batches=None  # Use all batches for final evaluation
+            max_batches=None,  # Use all batches for final evaluation
+            return_predictions=True
         )
+        test_ar_metrics, (predictions, targets) = test_ar_result
         print(f"\nTest Set AR Metrics:")
         print(f"  Token Accuracy:  {test_ar_metrics.token_accuracy:.2%}")
         print(f"  Pitch Accuracy:  {test_ar_metrics.pitch_accuracy:.2%}")
@@ -480,10 +601,13 @@ def main(cfg: DictConfig):
             total_notes=test_ar_metrics.total_notes
         )
 
-    print("\n" + "=" * 80)
-    print("Training complete!")
-    print(f"Results saved to {output_dir}")
-    print("=" * 80)
+        print("\n" + "=" * 80)
+        print("Training complete!")
+        print(f"Results saved to {output_dir}")
+        print("=" * 80)
+
+    # 12. Cleanup
+    cleanup_distributed()
 
 
 if __name__ == "__main__":

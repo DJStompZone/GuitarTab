@@ -67,34 +67,73 @@ class FrettingPostProcessor:
     def process_tokens(self,
                       model_output_tokens: List[str],
                       input_note_tokens: List[str],
-                      method: str = 'neighbor_search') -> List[str]:
+                      method: str = 'neighbor_search',
+                      output_format: str = 'auto') -> List[str]:
         """
         處理 token 序列並返回修正後的輸出
 
         這是主要的處理函數，執行完整的 post-processing pipeline。
 
         Args:
-            model_output_tokens: 模型預測的 TAB tokens (TAB<string,fret> format)
+            model_output_tokens: 模型輸出 tokens (TAB, NOTE_ON/OFF, 或 MIXED format)
             input_note_tokens: 輸入的 NOTE_ON/OFF tokens (ground truth pitches)
             method: Post-processing 方法:
                 - 'overlap': 只執行 overlap correction (~99.92% pitch accuracy)
                 - 'neighbor_search': 執行完整 pipeline (~100% pitch accuracy)
+            output_format: 輸出格式:
+                - 'auto': 自動檢測 (與輸入格式相同)
+                - 'tab': 強制 TAB format
+                - 'note_on_off': 強制 NOTE_ON/OFF format
+                - 'mixed': 強制 MIXED format (NOTE_ON/OFF + TAB)
 
         Returns:
-            修正後的 TAB tokens
+            修正後的 tokens (指定格式)
 
         Raises:
-            ValueError: 如果 method 不是 'overlap' 或 'neighbor_search'
-        """
-        # Step 1: Parse tokens to NoteSequence
-        input_sequence = self.parser.parse_input_tokens(input_note_tokens)
-        model_output = self.parser.parse_output_tokens(
-            model_output_tokens,
-            input_sequence,
-            self.config
-        )
+            ValueError: 如果 method 或 output_format 無效
 
-        # Step 2: Apply post-processing
+        Note:
+            支持三種模型輸出格式:
+            - TAB format: TAB<string,fret> TIME_SHIFT<ticks>
+            - NOTE_ON/OFF format: NOTE_ON<pitch> NOTE_OFF<pitch> TIME_SHIFT<ticks>
+            - MIXED format: NOTE_ON<pitch> TAB<string,fret> NOTE_OFF<pitch> TIME_SHIFT<ticks>
+
+            MIXED format 是訓練資料的標準格式，每個音符同時包含 pitch 和 tablature。
+
+            對於 NOTE_ON/OFF-only 輸出，會自動推導 tablature 以便應用
+            neighbor_search，然後將優化結果轉回 NOTE_ON/OFF。
+        """
+        # Step 1: Parse input sequence
+        input_sequence = self.parser.parse_input_tokens(input_note_tokens)
+
+        # Step 2: Detect model output format and parse
+        model_format = self._detect_output_format(model_output_tokens)
+
+        if model_format == 'TAB':
+            # TAB-only format
+            model_output = self.parser.parse_output_tokens(
+                model_output_tokens,
+                input_sequence,
+                self.config
+            )
+        elif model_format == 'NOTE_ON_OFF':
+            # NOTE_ON/OFF-only format - infer tablature
+            model_output = self.parser.parse_note_on_off_output(
+                model_output_tokens,
+                input_sequence,
+                self.config
+            )
+        elif model_format == 'MIXED':
+            # MIXED format (NOTE_ON/OFF + TAB) - parse both token types
+            model_output = self.parser.parse_mixed_format_output(
+                model_output_tokens,
+                input_sequence,
+                self.config
+            )
+        else:
+            raise ValueError(f"Unknown model output format: {model_format}")
+
+        # Step 3: Apply post-processing (保持不變)
         if method == 'overlap':
             # 只執行 overlap correction
             corrected_sequence = self.processor.overlap_correction(
@@ -114,16 +153,72 @@ class FrettingPostProcessor:
                 optimize_for='balanced'
             )
 
+            # 為 notes 附加 config (用於序列化時重新計算 pitch)
+            for note in result_sequence:
+                note._guitar_config = self.config
+
         else:
             raise ValueError(
                 f"Unknown method: {method}. "
                 f"Must be 'overlap' or 'neighbor_search'."
             )
 
-        # Step 3: Serialize back to tokens
-        output_tokens = self.serializer.serialize_to_output_format(result_sequence)
+        # Step 4: Serialize to requested format
+        if output_format == 'auto':
+            output_format = model_format.lower()
+
+        if output_format == 'tab':
+            output_tokens = self.serializer.serialize_to_output_format(result_sequence)
+        elif output_format == 'note_on_off':
+            output_tokens = self.serializer.serialize_to_note_on_off(result_sequence)
+        elif output_format == 'mixed':
+            output_tokens = self.serializer.serialize_to_mixed_format(result_sequence)
+        else:
+            raise ValueError(
+                f"Unknown output format: {output_format}. "
+                f"Must be 'auto', 'tab', 'note_on_off', or 'mixed'."
+            )
 
         return output_tokens
+
+    def _detect_output_format(self, tokens: List[str]) -> str:
+        """
+        自動檢測 token 格式
+
+        Args:
+            tokens: Token list to analyze
+
+        Returns:
+            'TAB', 'NOTE_ON_OFF', or 'MIXED'
+
+        Note:
+            檢查前 100 個非特殊 tokens。
+            - MIXED: 同時包含 TAB 和 NOTE_ON tokens (訓練資料格式)
+            - TAB: 只有 TAB tokens
+            - NOTE_ON_OFF: 只有 NOTE_ON/OFF tokens
+        """
+        # 檢查前 100 個 tokens (排除 PAD/BOS/EOS)
+        sample_tokens = [
+            t for t in tokens[:100]
+            if t not in ['PAD', 'BOS', 'EOS']
+        ]
+
+        tab_count = sum(1 for t in sample_tokens if t.startswith('TAB<'))
+        note_count = sum(1 for t in sample_tokens if t.startswith('NOTE_ON<'))
+
+        # 判斷格式
+        if tab_count > 0 and note_count > 0:
+            # 混合格式：同時有 TAB 和 NOTE_ON
+            return 'MIXED'
+        elif tab_count > 0:
+            # 只有 TAB
+            return 'TAB'
+        elif note_count > 0:
+            # 只有 NOTE_ON/OFF
+            return 'NOTE_ON_OFF'
+        else:
+            # 預設為 NOTE_ON_OFF (向後相容)
+            return 'NOTE_ON_OFF'
 
     def evaluate(self,
                 model_output_tokens: List[str],

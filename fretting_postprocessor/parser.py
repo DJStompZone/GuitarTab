@@ -271,3 +271,325 @@ class TokenParser:
                 ))
 
         return NoteSequence(notes, source="model")
+
+    def parse_note_on_off_output(
+        self,
+        tokens: List[str],
+        input_sequence: NoteSequence,
+        guitar_config: GuitarConfig,
+        default_velocity: int = 64
+    ) -> NoteSequence:
+        """
+        解析 NOTE_ON/OFF 格式的模型輸出並推導 tablature。
+
+        與 parse_input_tokens() 類似，但額外推導 string/fret 位置。
+        這允許後續的 neighbor_search 算法優化指法。
+
+        Args:
+            tokens: NOTE_ON/OFF format tokens (模型輸出)
+            input_sequence: 輸入序列（用於推導 duration/velocity）
+            guitar_config: 吉他配置
+            default_velocity: 預設力度
+
+        Returns:
+            NoteSequence with inferred tablature
+
+        Example:
+            >>> tokens = ["NOTE_ON<60>", "TIME_SHIFT<240>", "NOTE_OFF<60>"]
+            >>> config = GuitarConfig()
+            >>> input_seq = NoteSequence([])  # Empty input
+            >>> output_seq = parser.parse_note_on_off_output(tokens, input_seq, config)
+            >>> output_seq[0].pitch
+            60
+            >>> output_seq[0].has_tablature()
+            True
+
+        Process:
+            1. 解析 NOTE_ON/OFF tokens 得到 pitch 和 timing
+            2. 為每個 note 推導最佳 (string, fret) 位置
+            3. 嘗試匹配 input_sequence 的 duration/velocity
+        """
+        notes = []
+        current_time = 0
+        active_notes: Dict[int, int] = {}  # pitch -> onset_time
+
+        # 解析 tokens (與 parse_input_tokens 相同邏輯)
+        for token_str in tokens:
+            # NOTE_ON
+            match = self.NOTE_ON_PATTERN.match(token_str)
+            if match:
+                pitch = int(match.group(1))
+                if pitch in active_notes:
+                    # 處理缺失的 NOTE_OFF
+                    onset = active_notes.pop(pitch)
+                    duration = current_time - onset
+
+                    # 推導 tablature
+                    tablature = guitar_config.get_default_tablature_for_pitch(pitch)
+
+                    # 嘗試從 input 匹配 velocity
+                    velocity = self._find_velocity_from_input(
+                        pitch, onset, input_sequence, default_velocity
+                    )
+
+                    if tablature:
+                        string, fret = tablature
+                        notes.append(Note(
+                            pitch=pitch,
+                            onset_ticks=onset,
+                            duration_ticks=duration,
+                            velocity=velocity,
+                            string=string,
+                            fret=fret,
+                            source="model_inferred"
+                        ))
+                    else:
+                        # 無法表示的音高（超出範圍）
+                        warnings.warn(f"Cannot represent pitch {pitch} on guitar")
+
+                active_notes[pitch] = current_time
+                continue
+
+            # TIME_SHIFT
+            match = self.TIME_SHIFT_PATTERN.match(token_str)
+            if match:
+                ticks = int(match.group(1))
+                current_time += ticks
+                continue
+
+            # NOTE_OFF
+            match = self.NOTE_OFF_PATTERN.match(token_str)
+            if match:
+                pitch = int(match.group(1))
+                if pitch in active_notes:
+                    onset = active_notes.pop(pitch)
+                    duration = current_time - onset
+
+                    # 推導 tablature
+                    tablature = guitar_config.get_default_tablature_for_pitch(pitch)
+
+                    velocity = self._find_velocity_from_input(
+                        pitch, onset, input_sequence, default_velocity
+                    )
+
+                    if tablature:
+                        string, fret = tablature
+                        notes.append(Note(
+                            pitch=pitch,
+                            onset_ticks=onset,
+                            duration_ticks=duration,
+                            velocity=velocity,
+                            string=string,
+                            fret=fret,
+                            source="model_inferred"
+                        ))
+                continue
+
+            # 其他 tokens (BOS, EOS, etc.)
+            if token_str not in ['PAD', 'BOS', 'EOS', 'UNK']:
+                warnings.warn(f"Unexpected token in NOTE_ON/OFF output: {token_str}")
+
+        # 處理未關閉的 notes
+        for pitch, onset in active_notes.items():
+            duration = current_time - onset
+            tablature = guitar_config.get_default_tablature_for_pitch(pitch)
+            velocity = default_velocity
+
+            if tablature:
+                string, fret = tablature
+                notes.append(Note(
+                    pitch=pitch,
+                    onset_ticks=onset,
+                    duration_ticks=duration,
+                    velocity=velocity,
+                    string=string,
+                    fret=fret,
+                    source="model_inferred"
+                ))
+
+        return NoteSequence(notes, source="model_inferred")
+
+    def parse_mixed_format_output(
+        self,
+        tokens: List[str],
+        input_sequence: NoteSequence,
+        guitar_config: GuitarConfig,
+        default_velocity: int = 64
+    ) -> NoteSequence:
+        """
+        Parse MIXED format output (NOTE_ON/OFF + TAB tokens).
+
+        This format contains both pitch information (NOTE_ON/OFF) and tablature
+        (TAB) for each note. We extract tablature from TAB tokens and use
+        NOTE_ON/OFF for duration/timing information.
+
+        Args:
+            tokens: MIXED format tokens (model output)
+            input_sequence: Input sequence (for velocity matching)
+            guitar_config: Guitar configuration
+            default_velocity: Default velocity
+
+        Returns:
+            NoteSequence with tablature from TAB tokens
+        """
+        notes = []
+        current_time = 0
+        tab_buffer = []  # List of (string, fret, onset, pitch_from_note_on)
+        active_notes = {}  # pitch -> (onset, string, fret)
+
+        effective_tuning = guitar_config.get_effective_tuning()
+
+        for token_str in tokens:
+            # NOTE_ON - track onset and pitch
+            match = self.NOTE_ON_PATTERN.match(token_str)
+            if match:
+                pitch = int(match.group(1))
+                # Store onset for this pitch (will be matched with TAB or NOTE_OFF)
+                active_notes[pitch] = {'onset': current_time, 'string': None, 'fret': None}
+                continue
+
+            # TAB - extract tablature and match with active NOTE_ON
+            match = self.TAB_PATTERN.match(token_str)
+            if match:
+                string = int(match.group(1))
+                fret = int(match.group(2))
+
+                # Calculate pitch from TAB
+                if string < len(effective_tuning):
+                    tab_pitch = effective_tuning[string] + fret
+
+                    # Try to match with active NOTE_ON of same pitch
+                    if tab_pitch in active_notes:
+                        active_notes[tab_pitch]['string'] = string
+                        active_notes[tab_pitch]['fret'] = fret
+                    else:
+                        # TAB without matching NOTE_ON - buffer it
+                        tab_buffer.append((string, fret, current_time, tab_pitch))
+                continue
+
+            # NOTE_OFF - finalize note with duration
+            match = self.NOTE_OFF_PATTERN.match(token_str)
+            if match:
+                pitch = int(match.group(1))
+
+                if pitch in active_notes:
+                    note_info = active_notes.pop(pitch)
+                    onset = note_info['onset']
+                    duration = current_time - onset
+                    string = note_info['string']
+                    fret = note_info['fret']
+
+                    # If we have tablature from TAB token, use it
+                    if string is not None and fret is not None:
+                        # Find velocity from input
+                        velocity = self._find_velocity_from_input(
+                            pitch, onset, input_sequence, default_velocity
+                        )
+
+                        notes.append(Note(
+                            pitch=pitch,
+                            onset_ticks=onset,
+                            duration_ticks=duration,
+                            velocity=velocity,
+                            string=string,
+                            fret=fret,
+                            source="model_mixed"
+                        ))
+                    # else: NOTE_OFF without TAB - skip (malformed)
+                continue
+
+            # TIME_SHIFT
+            match = self.TIME_SHIFT_PATTERN.match(token_str)
+            if match:
+                ticks = int(match.group(1))
+
+                # Flush buffered TAB tokens before advancing time
+                if tab_buffer:
+                    for string, fret, onset, pitch in tab_buffer:
+                        # Estimate duration from time shift
+                        duration = ticks
+                        velocity = default_velocity
+
+                        notes.append(Note(
+                            pitch=pitch,
+                            onset_ticks=onset,
+                            duration_ticks=duration,
+                            velocity=velocity,
+                            string=string,
+                            fret=fret,
+                            source="model_mixed"
+                        ))
+
+                    tab_buffer.clear()
+
+                current_time += ticks
+                continue
+
+            # Special tokens (PAD, BOS, EOS, UNK) - ignore
+            if token_str in ['PAD', 'BOS', 'EOS', 'UNK']:
+                continue
+
+            # Unknown token - warn but continue
+            warnings.warn(f"Unexpected token in MIXED output: {token_str}")
+
+        # Process remaining buffered TAB or active notes
+        if tab_buffer:
+            for string, fret, onset, pitch in tab_buffer:
+                notes.append(Note(
+                    pitch=pitch,
+                    onset_ticks=onset,
+                    duration_ticks=480,  # Default duration
+                    velocity=default_velocity,
+                    string=string,
+                    fret=fret,
+                    source="model_mixed"
+                ))
+
+        for pitch, note_info in active_notes.items():
+            onset = note_info['onset']
+            string = note_info['string']
+            fret = note_info['fret']
+
+            if string is not None and fret is not None:
+                duration = current_time - onset
+                velocity = default_velocity
+
+                notes.append(Note(
+                    pitch=pitch,
+                    onset_ticks=onset,
+                    duration_ticks=duration,
+                    velocity=velocity,
+                    string=string,
+                    fret=fret,
+                    source="model_mixed"
+                ))
+
+        return NoteSequence(notes, source="model_mixed")
+
+    def _find_velocity_from_input(
+        self,
+        pitch: int,
+        onset: int,
+        input_sequence: NoteSequence,
+        default: int
+    ) -> int:
+        """
+        從 input sequence 中尋找匹配的 note 並提取 velocity。
+
+        Args:
+            pitch: 目標音高
+            onset: 起始時間
+            input_sequence: 輸入序列
+            default: 預設值
+
+        Returns:
+            Velocity value
+        """
+        time_window = 120  # ticks tolerance
+
+        for note in input_sequence:
+            if (note.pitch == pitch and
+                abs(note.onset_ticks - onset) <= time_window):
+                return note.velocity
+
+        return default

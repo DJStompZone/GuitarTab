@@ -175,6 +175,115 @@ class GuitarConfig:
             max_fret=max_fret
         )
 
+    def infer_tablature_from_pitch(
+        self,
+        pitch: int,
+        prefer_string: int = None,
+        avoid_strings: set = None
+    ) -> List[Tuple[int, int]]:
+        """
+        從 MIDI pitch 推導所有可能的 (string, fret) 組合，按可行性排序。
+
+        與 pitch_to_string_fret() 類似，但添加了啟發式評分以優先推薦
+        更易演奏的位置。
+
+        Args:
+            pitch: MIDI pitch value
+            prefer_string: 優先選擇的弦索引（如果可能）
+            avoid_strings: 要避免的弦索引集合
+
+        Returns:
+            List of (string, fret) tuples，按可行性分數排序（高分優先）
+
+        Example:
+            >>> config = GuitarConfig()
+            >>> # Middle C (60) 可以在多條弦上演奏
+            >>> positions = config.infer_tablature_from_pitch(60)
+            >>> positions[0]  # 最佳選擇（最易演奏）
+            (3, 5)  # G string, 5th fret
+
+            >>> # 偏好特定弦
+            >>> positions = config.infer_tablature_from_pitch(60, prefer_string=2)
+            >>> positions[0]
+            (2, 10)  # D string, 10th fret (因為被偏好)
+
+        Scoring heuristics:
+            - Strong preference for specified string (+100 points)
+            - Preference for middle frets (7th fret = optimal)
+            - Preference for middle strings (avoid extreme highs/lows)
+        """
+        effective_tuning = self.get_effective_tuning()
+        possibilities = []
+
+        for string in range(len(effective_tuning)):
+            # 跳過要避免的弦
+            if avoid_strings and string in avoid_strings:
+                continue
+
+            fret = pitch - effective_tuning[string]
+
+            if self.is_valid_fret(fret):
+                # 計算可行性分數
+                score = 0.0
+
+                # 強烈偏好指定的弦
+                if prefer_string is not None and string == prefer_string:
+                    score += 100
+
+                # 偏好中間品格（第7品附近最佳）
+                fret_distance = abs(fret - 7)
+                score -= fret_distance * 0.5
+
+                # 偏好中間弦（避免極端高/低弦）
+                string_center = (self.num_strings - 1) / 2.0
+                string_distance = abs(string - string_center)
+                score -= string_distance * 1.0
+
+                # 避免開放弦（0品），稍微降低分數
+                if fret == 0:
+                    score -= 2
+
+                # 避免過高品格（>12），顯著降低分數
+                if fret > 12:
+                    score -= (fret - 12) * 2
+
+                possibilities.append((string, fret, score))
+
+        # 按分數排序（高分優先）
+        possibilities.sort(key=lambda x: x[2], reverse=True)
+
+        # 返回 (string, fret) 對，移除分數
+        return [(s, f) for s, f, _ in possibilities]
+
+    def get_default_tablature_for_pitch(self, pitch: int) -> Tuple[int, int]:
+        """
+        獲取 pitch 的預設 (string, fret) 位置。
+
+        這是 infer_tablature_from_pitch() 的簡化版本，直接返回最佳選擇。
+        適用於快速推導單個 note 的 tablature。
+
+        Args:
+            pitch: MIDI pitch value
+
+        Returns:
+            (string, fret) tuple 代表最佳演奏位置
+            如果 pitch 無法在吉他上演奏則返回 None
+
+        Example:
+            >>> config = GuitarConfig()
+            >>> config.get_default_tablature_for_pitch(60)  # Middle C
+            (3, 5)  # G string, 5th fret
+
+            >>> config.get_default_tablature_for_pitch(20)  # Too low
+            None  # 無法演奏
+        """
+        possibilities = self.infer_tablature_from_pitch(pitch)
+
+        if possibilities:
+            return possibilities[0]  # 返回分數最高的選擇
+        else:
+            return None  # 無法演奏此 pitch
+
     def __repr__(self) -> str:
         """String representation for debugging"""
         tuning_str = ', '.join(str(p) for p in self.tuning)

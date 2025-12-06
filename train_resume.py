@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """
 Training script for Fretting-Transformer using Hydra configuration.
+Supports resuming from checkpoints.
 """
 
 import os
@@ -187,6 +188,43 @@ def create_optimizer(model: nn.Module, cfg: DictConfig):
     return optimizer
 
 
+def load_checkpoint(checkpoint_path: str, model: nn.Module, optimizer, device: str):
+    """
+    Load checkpoint and restore training state.
+
+    Args:
+        checkpoint_path: Path to checkpoint file
+        model: Model to load state into
+        optimizer: Optimizer to load state into
+        device: Device to load checkpoint on
+
+    Returns:
+        Tuple of (start_epoch, best_val_loss, checkpoint_config)
+    """
+    print(f"\nLoading checkpoint from {checkpoint_path}")
+    checkpoint = torch.load(checkpoint_path, map_location=device)
+
+    # Load model state
+    model.load_state_dict(checkpoint['model_state_dict'])
+    print(f"  ✓ Loaded model weights")
+
+    # Load optimizer state
+    optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
+    print(f"  ✓ Loaded optimizer state")
+
+    # Get training state
+    start_epoch = checkpoint['epoch'] + 1  # Resume from next epoch
+    best_val_loss = checkpoint.get('val_loss', float('inf'))
+
+    print(f"  ✓ Resuming from epoch {checkpoint['epoch']}")
+    print(f"  ✓ Best validation loss: {best_val_loss:.4f}")
+
+    # Return checkpoint config for verification
+    checkpoint_config = checkpoint.get('config', None)
+
+    return start_epoch, best_val_loss, checkpoint_config
+
+
 def train_epoch(
     model: FrettingTransformer,
     train_loader: DataLoader,
@@ -302,7 +340,7 @@ def evaluate(model: FrettingTransformer, val_loader: DataLoader, device: str):
 def main(cfg: DictConfig):
     """Main training function."""
     print("=" * 80)
-    print("Fretting-Transformer Training")
+    print("Fretting-Transformer Training (with Resume Support)")
     print("=" * 80)
     # print("\nConfiguration:")
     # print(OmegaConf.to_yaml(cfg))
@@ -345,11 +383,31 @@ def main(cfg: DictConfig):
     # Create optimizer
     optimizer = create_optimizer(model, cfg)
 
-    # Training loop
-    print("\nStarting training...")
+    # Check for checkpoint to resume from
+    start_epoch = 1
     best_val_loss = float("inf")
 
-    for epoch in range(1, cfg.training.num_epochs + 1):
+    resume_checkpoint = cfg.training.get('resume_checkpoint', None)
+    if resume_checkpoint:
+        checkpoint_path = Path(resume_checkpoint)
+        if checkpoint_path.exists():
+            start_epoch, best_val_loss, checkpoint_config = load_checkpoint(
+                str(checkpoint_path), model, optimizer, device
+            )
+
+            # Optionally warn if configs differ
+            if checkpoint_config is not None:
+                print("\n⚠ Note: Continuing with current config, not checkpoint config")
+        else:
+            print(f"\n⚠ Warning: Checkpoint not found at {checkpoint_path}")
+            print("Starting training from scratch...")
+    else:
+        print("\nNo checkpoint specified. Starting training from scratch...")
+
+    # Training loop
+    print("\nStarting training...")
+
+    for epoch in range(start_epoch, cfg.training.num_epochs + 1):
         print(f"\n{'=' * 80}")
         print(f"Epoch {epoch}/{cfg.training.num_epochs}")
         print(f"{'=' * 80}")
@@ -369,15 +427,17 @@ def main(cfg: DictConfig):
         if cfg.training.get('ar_eval_enabled', False) and cfg.training.get('ar_eval_frequency', 0) > 0:
             if epoch % cfg.training.ar_eval_frequency == 0:
                 print(f"\nRunning AR evaluation (generation + accuracy)...")
-                ar_metrics, (input_ids, targets, predictions) = generate_and_compute_accuracy(
+                ar_result = generate_and_compute_accuracy(
                     model=model,
                     dataloader=val_loader,
                     output_vocab=dataset.output_vocab,
                     device=device,
                     max_length=cfg.training.get('ar_eval_max_length', 1024),
                     num_beams=cfg.training.get('ar_eval_num_beams', 1),
-                    max_batches=cfg.training.get('ar_eval_max_batches', None)
+                    max_batches=cfg.training.get('ar_eval_max_batches', None),
+                    return_predictions=True
                 )
+                ar_metrics, (predictions, targets) = ar_result
                 print(f"AR Metrics: {ar_metrics}")
 
                 # Save generated samples
@@ -447,15 +507,17 @@ def main(cfg: DictConfig):
     # Final AR evaluation on test set
     if cfg.training.get('ar_eval_enabled', False):
         print(f"\nFinal AR evaluation on test set...")
-        test_ar_metrics, (input_ids, targets, predictions) = generate_and_compute_accuracy(
+        test_ar_result = generate_and_compute_accuracy(
             model=model,
             dataloader=test_loader,
             output_vocab=dataset.output_vocab,
             device=device,
             max_length=cfg.training.get('ar_eval_max_length', 1024),
             num_beams=cfg.training.get('ar_eval_num_beams', 1),
-            max_batches=None  # Use all batches for final evaluation
+            max_batches=None,  # Use all batches for final evaluation
+            return_predictions=True
         )
+        test_ar_metrics, (predictions, targets) = test_ar_result
         print(f"\nTest Set AR Metrics:")
         print(f"  Token Accuracy:  {test_ar_metrics.token_accuracy:.2%}")
         print(f"  Pitch Accuracy:  {test_ar_metrics.pitch_accuracy:.2%}")

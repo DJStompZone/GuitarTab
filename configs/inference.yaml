@@ -1,5 +1,6 @@
 defaults:
   - config
+  - postprocessing: default
   - _self_
 
 # Experiment settings
@@ -7,3 +8,4 @@ seed: 42
 exp: ${now:%Y-%m-%d_%H-%M}
 experiment_name: ${exp}-inference
 output_dir: "outputs/${experiment_name}"
+# checkpoint_path: outputs/2025-12-05_23-36/checkpoint_epoch_200.pt

@@ -166,33 +166,101 @@ class FrettingTransformer(nn.Module):
         input_ids: torch.Tensor,
         attention_mask: Optional[torch.Tensor] = None,
         max_length: int = 512,
-        num_beams: int = 1,
-        **kwargs
+        start_token_id: Optional[torch.Tensor] = None,
+        eos_token_id: int = 2,
+        pad_token_id: int = 0,
+        temperature: float = 1.0,
+        verbose: bool = False,
+        **kwargs  # Ignore unused HF params (num_beams, etc.)
     ):
         """
-        Generate output sequences autoregressively (for inference).
+        Custom autoregressive generation with teacher forcing support.
 
         Args:
-            input_ids: [B, L_enc] - Encoder input token IDs
-            attention_mask: [B, L_enc] - Encoder padding mask
-            max_length: Maximum generation length (absolute, not relative)
-            num_beams: Number of beams for beam search (1 = greedy decoding)
-            **kwargs: Additional generation arguments (temperature, top_k, top_p, etc.)
+            input_ids: [B, L_enc] - Encoder input
+            attention_mask: [B, L_enc] - Encoder mask
+            max_length: Maximum generation length
+            start_token_id: [B] - First decoder token per sample
+                           If None, uses decoder_start_token_id=1 (BOS)
+            eos_token_id: Token ID to stop generation
+            pad_token_id: Padding token ID
+            temperature: Sampling temperature (1.0 = greedy)
+            verbose: Print generation progress
 
         Returns:
-            [B * num_beams, L_gen] - Generated token IDs
-            where L_gen <= max_length
+            [B, L_gen] - Generated sequences (includes start token)
 
         Note:
-            - Uses causal decoding: generates one token at a time
-            - Starts with BOS token (decoder_start_token_id)
-            - Stops at EOS token or max_length
-            - For beam search (num_beams > 1), batch dimension expands
+            - Encodes input once and reuses encoder outputs (efficient)
+            - Supports per-sample teacher forcing via start_token_id
+            - Uses greedy decoding (beam search not yet implemented)
+            - Properly handles EOS tokens and pads finished sequences
         """
-        return self.model.generate(
-            input_ids=input_ids,
-            attention_mask=attention_mask,
-            max_length=max_length,
-            num_beams=num_beams,
-            **kwargs
-        )
+        device = input_ids.device
+        batch_size = input_ids.shape[0]
+
+        # Encode input once
+        with torch.no_grad():
+            encoder_outputs = self.model.encoder(
+                input_ids=input_ids,
+                attention_mask=attention_mask,
+            )
+
+        # Initialize decoder with start tokens (per-sample or BOS)
+        if start_token_id is None:
+            start_token_id = torch.full((batch_size,), 1, dtype=torch.long, device=device)  # BOS
+
+        decoder_input_ids = start_token_id.unsqueeze(1)  # [B, 1]
+
+        generated_tokens = []
+        finished = torch.zeros(batch_size, dtype=torch.bool, device=device)
+
+        # Autoregressive generation
+        for step in range(max_length):
+            with torch.no_grad():
+                decoder_attention_mask = torch.ones_like(decoder_input_ids)
+
+                outputs = self.model(
+                    encoder_outputs=encoder_outputs,
+                    decoder_input_ids=decoder_input_ids,
+                    decoder_attention_mask=decoder_attention_mask,
+                    attention_mask=attention_mask,
+                )
+
+                # Get logits for last position
+                logits = outputs.logits[:, -1, :]  # [B, vocab_size]
+
+                # Temperature scaling
+                if temperature != 1.0:
+                    logits = logits / temperature
+
+                # Greedy decoding
+                next_token = torch.argmax(logits, dim=-1)  # [B]
+
+                # Mark finished sequences
+                finished = finished | (next_token == eos_token_id)
+
+                # Replace tokens in finished sequences with pad
+                next_token = torch.where(finished, pad_token_id, next_token)
+
+                generated_tokens.append(next_token)
+
+                # Stop if all sequences finished
+                if finished.all():
+                    if verbose:
+                        print(f"All sequences finished at step {step}")
+                    break
+
+                # Append to decoder input
+                decoder_input_ids = torch.cat([
+                    decoder_input_ids,
+                    next_token.unsqueeze(1)
+                ], dim=1)
+
+        # Stack generated tokens
+        generated_sequence = torch.stack(generated_tokens, dim=1)  # [B, L]
+
+        # Prepend start tokens
+        full_sequence = torch.cat([start_token_id.unsqueeze(1), generated_sequence], dim=1)
+
+        return full_sequence

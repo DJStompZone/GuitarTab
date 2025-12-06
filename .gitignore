@@ -1,16 +1,19 @@
 Dataset*
-
-*.pdf
-*/slurm-*
 DadaGP-v1.1/
 DadaGP-v1.1
 Dataset_new/
-__pycache__
-
 Dataset_midi/*
 !Dataset_midi/.gitkeep
+__pycache__
+
+*.pdf
+**/slurm-*
+*.log
+# slurm-*
+
 
 outputs/
 
 .vscode/
 CLAUDE.md
+GEMINI.md

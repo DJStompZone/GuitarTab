@@ -1,0 +1,32 @@
+# Post-processing configuration for Fretting-Transformer
+#
+# This configuration enables post-processing of model predictions to improve
+# pitch accuracy to ~100% using the fretting_postprocessor module.
+
+# Enable/disable post-processing (default: false for backward compatibility)
+enabled: true
+
+# Post-processing method
+# Options:
+#   - "overlap": Overlap correction only (~99.92% pitch accuracy)
+#   - "neighbor_search": Full pipeline with neighbor search (~100% pitch accuracy)
+method: "neighbor_search"
+
+# Guitar configuration
+guitar:
+  num_strings: 6
+
+  # Guitar tuning preset
+  # Options: "standard", "drop_d", "half_step_down", "full_step_down"
+  tuning: "standard"
+
+  # Capo position (fret number, 0 = no capo)
+  capo_fret: 0
+
+  # Fret range
+  min_fret: 0
+  max_fret: 24
+
+# Output and evaluation options
+save_intermediate: true  # Save raw predictions before post-processing
+verbose: true            # Print comparison table with metrics

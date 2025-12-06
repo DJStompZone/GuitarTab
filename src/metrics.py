@@ -32,6 +32,47 @@ class TabAccuracyMetrics:
         )
 
 
+@dataclass
+class PostProcessingMetrics:
+    """Container for post-processing comparison metrics."""
+
+    # Raw model metrics
+    raw_token_accuracy: float
+    raw_pitch_accuracy: float
+    raw_tab_accuracy: float
+
+    # Post-processed metrics
+    post_token_accuracy: float
+    post_pitch_accuracy: float
+    post_tab_accuracy: float
+
+    # Improvements
+    token_improvement: float
+    pitch_improvement: float
+    tab_improvement: float
+
+    # Counts
+    total_tokens: int
+    total_notes: int
+
+    # Method used
+    method: str
+
+    def __str__(self) -> str:
+        return (
+            f"Method: {self.method}\n"
+            f"Raw:  Token {self.raw_token_accuracy:.2%} | "
+            f"Pitch {self.raw_pitch_accuracy:.2%} | "
+            f"Tab {self.raw_tab_accuracy:.2%}\n"
+            f"Post: Token {self.post_token_accuracy:.2%} | "
+            f"Pitch {self.post_pitch_accuracy:.2%} | "
+            f"Tab {self.post_tab_accuracy:.2%}\n"
+            f"Improvement: Token {self.token_improvement:+.2%} | "
+            f"Pitch {self.pitch_improvement:+.2%} | "
+            f"Tab {self.tab_improvement:+.2%}"
+        )
+
+
 def compute_tablature_accuracy(
     predictions: torch.Tensor, targets: torch.Tensor, output_vocab, pad_id: int = 0
 ) -> TabAccuracyMetrics:
@@ -47,9 +88,9 @@ def compute_tablature_accuracy(
     Returns:
         TabAccuracyMetrics with computed accuracies
     """
-    # Flatten tensors
-    pred_flat = predictions.view(-1)
-    target_flat = targets.view(-1)
+    # Flatten tensors (use reshape to handle non-contiguous tensors)
+    pred_flat = predictions.reshape(-1)
+    target_flat = targets.reshape(-1)
 
     # Mask out padding
     non_pad_mask = target_flat != pad_id
@@ -122,8 +163,10 @@ def generate_and_compute_accuracy(
     output_vocab,
     device: str,
     max_length: int = 1024,
-    num_beams: int = 1,
+    num_beams: int = 1,  # DEPRECATED (kept for config compat)
     max_batches: Optional[int] = None,
+    use_teacher_forcing: bool = True,  # NEW
+    temperature: float = 1.0,  # NEW
 ) -> tuple[TabAccuracyMetrics, tuple[torch.Tensor, torch.Tensor, torch.Tensor]]:
     """
     Generate sequences autoregressively and compute accuracy.
@@ -164,16 +207,22 @@ def generate_and_compute_accuracy(
             attention_mask = batch["attention_mask"].to(device)
             target_ids = batch["output_ids"].to(device)
 
-            # Generate (autoregressive)
+            # Extract first target token per sample for teacher forcing
+            if use_teacher_forcing:
+                start_token_id = target_ids[:, 0]  # [B] - per-sample first tokens
+            else:
+                start_token_id = None  # Will use BOS=1
+
+            # Generate (now uses custom implementation)
             generated = model.generate(
                 input_ids=input_ids,
                 attention_mask=attention_mask,
                 max_length=max_length,
-                num_beams=num_beams,
+                start_token_id=start_token_id,
+                eos_token_id=output_vocab.eos_id if hasattr(output_vocab, "eos_id") else 2,
                 pad_token_id=output_vocab.pad_id,
-                eos_token_id=output_vocab.eos_id
-                if hasattr(output_vocab, "eos_id")
-                else None,
+                temperature=temperature,
+                verbose=False
             )
 
             # Pad/trim both generated and targets to max_length for uniform shape
@@ -246,3 +295,62 @@ def generate_and_compute_accuracy(
     )
 
     return metrics, (input_ids, targets, predictions)
+
+
+def compute_postprocessing_metrics(
+    raw_predictions: torch.Tensor,
+    postprocessed_predictions: torch.Tensor,
+    targets: torch.Tensor,
+    output_vocab,
+    method: str,
+    pad_id: int = 0
+) -> PostProcessingMetrics:
+    """
+    Compute comparison metrics between raw and post-processed predictions.
+
+    Args:
+        raw_predictions: Original model predictions [B, L]
+        postprocessed_predictions: After post-processing [B, L]
+        targets: Ground truth [B, L]
+        output_vocab: Output vocabulary
+        method: Post-processing method used
+        pad_id: Padding token ID
+
+    Returns:
+        PostProcessingMetrics with all comparisons
+    """
+    # Compute metrics for raw predictions
+    raw_metrics = compute_tablature_accuracy(
+        predictions=raw_predictions,
+        targets=targets,
+        output_vocab=output_vocab,
+        pad_id=pad_id
+    )
+
+    # Compute metrics for post-processed predictions
+    post_metrics = compute_tablature_accuracy(
+        predictions=postprocessed_predictions,
+        targets=targets,
+        output_vocab=output_vocab,
+        pad_id=pad_id
+    )
+
+    # Calculate improvements
+    token_improvement = post_metrics.token_accuracy - raw_metrics.token_accuracy
+    pitch_improvement = post_metrics.pitch_accuracy - raw_metrics.pitch_accuracy
+    tab_improvement = post_metrics.tab_accuracy - raw_metrics.tab_accuracy
+
+    return PostProcessingMetrics(
+        raw_token_accuracy=raw_metrics.token_accuracy,
+        raw_pitch_accuracy=raw_metrics.pitch_accuracy,
+        raw_tab_accuracy=raw_metrics.tab_accuracy,
+        post_token_accuracy=post_metrics.token_accuracy,
+        post_pitch_accuracy=post_metrics.pitch_accuracy,
+        post_tab_accuracy=post_metrics.tab_accuracy,
+        token_improvement=token_improvement,
+        pitch_improvement=pitch_improvement,
+        tab_improvement=tab_improvement,
+        total_tokens=raw_metrics.total_tokens,
+        total_notes=raw_metrics.total_notes,
+        method=method
+    )

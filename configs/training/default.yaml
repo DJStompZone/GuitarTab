@@ -33,11 +33,13 @@ fp16: false
 bf16: false
 
 # Evaluation
-eval_batch_size: 64
+eval_batch_size: 128
 
 # Autoregressive (AR) evaluation - computes real accuracy via generation
 ar_eval_enabled: true           # Whether to do AR eval
 ar_eval_frequency: 5            # Run AR eval every N epochs (0 = never)
 ar_eval_max_batches: 10         # Limit batches for speed (null = all)
 ar_eval_max_length: 1024        # Max generation length
-ar_eval_num_beams: 1            # Beam search beams (1 = greedy)
+ar_eval_num_beams: 1            # DEPRECATED: Beam search beams (1 = greedy, kept for compat)
+ar_eval_use_teacher_forcing: true  # NEW: Start generation with first target token
+ar_eval_temperature: 1.0        # NEW: Temperature for sampling (1.0 = greedy)
