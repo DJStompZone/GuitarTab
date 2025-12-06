@@ -211,8 +211,15 @@ def train_epoch(
         #   decoder_attention_mask: [B, L_dec] - Decoder padding mask (1=real, 0=pad)
         input_ids = batch["input_ids"].to(device)
         attention_mask = batch["attention_mask"].to(device)
-        labels = batch["output_ids"].to(device)
+        output_ids = batch["output_ids"].to(device)
         decoder_attention_mask = batch["decoder_attention_mask"].to(device)
+
+        # Debugging: inspect batch data
+        # print("INPUT:", input_ids[0][:20])
+        # print("LABEL:", labels[0][:20])
+        # print("LABEL TAIL:", labels[0][-20:])
+        # print("UNIQUE LABEL:", torch.unique(labels[0])[:30])
+        # breakpoint()
 
         # Shift labels right for decoder input (teacher forcing)
         # T5 expects: decoder_input = [BOS, tok1, tok2, ..., tokN-1]
@@ -221,9 +228,22 @@ def train_epoch(
         #   decoder_input_ids: [B, L_dec-1] - Decoder input (all except last token)
         #   labels: [B, L_dec-1] - Target labels (all except first token)
         #   decoder_attention_mask: [B, L_dec-1] - Mask for decoder input
-        decoder_input_ids = labels[:, :-1].contiguous()
-        labels = labels[:, 1:].contiguous()
-        decoder_attention_mask = decoder_attention_mask[:, 1:].contiguous()
+
+        # original
+        # decoder_input_ids = labels[:, :-1].contiguous()
+        # labels = labels[:, 1:].contiguous()
+        # decoder_attention_mask = decoder_attention_mask[:, 1:].contiguous()
+        
+        # modified
+        # manually shifting
+        decoder_input_ids = output_ids[:, :-1].contiguous()
+        labels = output_ids[:, 1:].contiguous()
+
+        # Mask pad tokens in labels
+        labels = labels.clone()
+        labels[labels == 0] = -100 # PAD id is 0
+
+        decoder_attention_mask = decoder_attention_mask[:, :-1].contiguous()
 
         # Forward pass
         outputs: Seq2SeqLMOutput = model(
@@ -273,14 +293,29 @@ def evaluate(model: FrettingTransformer, val_loader: DataLoader, device: str):
             # Shapes: [B, L_enc], [B, L_enc], [B, L_dec], [B, L_dec]
             input_ids = batch["input_ids"].to(device)
             attention_mask = batch["attention_mask"].to(device)
-            labels = batch["output_ids"].to(device)
+            # labels = batch["output_ids"].to(device)
+            # decoder_input_ids = batch["decoder_input_ids"].to(device)
+            # labels = batch["labels"].to(device)
+            output_ids = batch["output_ids"].to(device)
             decoder_attention_mask = batch["decoder_attention_mask"].to(device)
 
             # Shift labels right
             # Shapes after: [B, L_dec-1], [B, L_dec-1], [B, L_dec-1]
-            decoder_input_ids = labels[:, :-1].contiguous()
-            labels = labels[:, 1:].contiguous()
-            decoder_attention_mask = decoder_attention_mask[:, 1:].contiguous()
+            # original
+            # decoder_input_ids = labels[:, :-1].contiguous()
+            # labels = labels[:, 1:].contiguous()
+            # decoder_attention_mask = decoder_attention_mask[:, 1:].contiguous()
+            
+            # modified
+            # manually shifting
+            decoder_input_ids = output_ids[:, :-1].contiguous()
+            labels = output_ids[:, 1:].contiguous()
+
+            # Mask pad tokens in labels
+            labels = labels.clone()
+            labels[labels == 0] = -100 # PAD id is 0
+
+            decoder_attention_mask = decoder_attention_mask[:, :-1].contiguous()
 
             # Forward pass
             outputs: Seq2SeqLMOutput = model(

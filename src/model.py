@@ -9,7 +9,6 @@ import torch.nn as nn
 from transformers import T5Config, T5ForConditionalGeneration
 from typing import Optional
 
-
 def create_model(
     input_vocab_size: int,
     output_vocab_size: int,
@@ -19,7 +18,7 @@ def create_model(
     num_heads: int = 4,
     dropout_rate: float = 0.1,
     pretrained: bool = False
-) -> T5ForConditionalGeneration:
+):
     """
     Create custom T5 model for guitar tablature transcription.
 
@@ -36,12 +35,13 @@ def create_model(
     Returns:
         T5ForConditionalGeneration model
     """
+
     # Create custom T5 configuration
     config = T5Config(
-        vocab_size=input_vocab_size,  # Encoder vocabulary
-        decoder_start_token_id=1,  # BOS token
-        eos_token_id=2,  # EOS token
-        pad_token_id=0,  # PAD token
+        vocab_size=output_vocab_size,    # Decoder vocab
+        decoder_start_token_id=1,        # BOS token
+        eos_token_id=2,                  # EOS token
+        pad_token_id=0,                  # PAD token
         d_model=d_model,
         d_kv=d_model // num_heads,
         d_ff=d_ff,
@@ -49,36 +49,41 @@ def create_model(
         num_decoder_layers=num_layers,
         num_heads=num_heads,
         dropout_rate=dropout_rate,
-        layer_norm_epsilon=1e-6,
-        initializer_factor=1.0,
-        feed_forward_proj="relu",
-        is_encoder_decoder=True,
         use_cache=True,
-        tie_word_embeddings=False,  # Don't tie encoder/decoder embeddings
+        tie_word_embeddings=False,     
     )
 
     # Initialize model from scratch
     model = T5ForConditionalGeneration(config)
 
-    # Resize decoder token embeddings if needed (different vocab for output)
-    if output_vocab_size != input_vocab_size:
-        model.resize_token_embeddings(input_vocab_size)
-        # Manually set decoder embedding size
-        model.decoder.embed_tokens = nn.Embedding(
-            output_vocab_size,
-            d_model,
-            padding_idx=0
-        )
-        model.lm_head = nn.Linear(d_model, output_vocab_size, bias=False)
+    # Replace encoder embedding
+    model.encoder.embed_tokens = nn.Embedding(
+        input_vocab_size,
+        d_model,
+        padding_idx=0
+    )
 
-    print(f"Created custom T5 model:")
-    print(f"  Encoder vocab: {input_vocab_size}")
-    print(f"  Decoder vocab: {output_vocab_size}")
+    # Replace decoder embedding
+    model.decoder.embed_tokens = nn.Embedding(
+        output_vocab_size,
+        d_model,
+        padding_idx=0
+    )
+
+    # Replace LM head
+    model.lm_head = nn.Linear(d_model, output_vocab_size, bias=False)
+
+    # Weight tying (decoder embed ↔ lm_head)
+    model.lm_head.weight = model.decoder.embed_tokens.weight
+
+    print(f"Custom T5 created:")
+    print(f"  Encoder vocab = {input_vocab_size}")
+    print(f"  Decoder vocab = {output_vocab_size}")
     print(f"  d_model: {d_model}")
     print(f"  d_ff: {d_ff}")
     print(f"  layers: {num_layers}")
     print(f"  heads: {num_heads}")
-    print(f"  parameters: {sum(p.numel() for p in model.parameters()):,}")
+    print(f"  Parameters    = {sum(p.numel() for p in model.parameters()):,}")
 
     return model
 
@@ -137,7 +142,7 @@ class FrettingTransformer(nn.Module):
             attention_mask: [B, L_enc] - Encoder padding mask (1=real, 0=pad)
             decoder_input_ids: [B, L_dec] - Decoder input token IDs (for teacher forcing)
             decoder_attention_mask: [B, L_dec] - Decoder padding mask (1=real, 0=pad)
-                                     Note: Causal masking is applied automatically by T5
+            Note: Causal masking is applied automatically by T5
             labels: [B, L_dec] - Target labels for loss computation
 
         Returns:

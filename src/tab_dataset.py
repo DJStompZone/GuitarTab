@@ -323,7 +323,22 @@ class TabDataset:
                 segments = self._split_into_segments(
                     input_ids, output_ids, bar_positions
                 )
-                all_segments.extend(segments)
+                
+                # insert BOS and EOS
+                for inp, out in segments:
+                    # insert BOS and EOS
+                    out = [self.output_vocab.bos_id] + out + [self.output_vocab.eos_id]
+                    
+                    # only EOS
+                    # out = out + [self.output_vocab.eos_id]
+                    
+                    # ensure max length
+                    if len(out) > self.max_sequence_length:
+                        out = out[:self.max_sequence_length - 1] + [self.output_vocab.eos_id]
+                                    
+                    all_segments.append((inp, out))
+                
+                # all_segments.extend(segments)
 
             except Exception as e:
                 print(f"Error processing {token_file}: {e}")
@@ -415,6 +430,7 @@ class TabDataset:
             Note: input_seq_len != output_seq_len (output has extra TAB tokens)
         """
         input_ids, output_ids = self.segments[idx]
+         
         return np.array(input_ids, dtype=np.int64), np.array(output_ids, dtype=np.int64)
 
     def get_vocab_sizes(self) -> tuple[int, int]:
@@ -437,56 +453,31 @@ class TabDatasetBatchInput(TypedDict):
     attention_mask: torch.Tensor  # [B, L_enc]
     decoder_attention_mask: torch.Tensor  # [B, L_dec]
 
+def collate_fn(batch, input_pad_id=0, output_pad_id=0):
 
-def collate_fn(
-    batch: list[tuple[np.ndarray, np.ndarray]],
-    input_pad_id: int = 0,
-    output_pad_id: int = 0,
-) -> TabDatasetBatchInput:
-    """
-    Collate function for batching with padding.
+    input_ids_list = [b[0] for b in batch]
+    output_ids_list = [b[1] for b in batch]
 
-    Args:
-        batch: List of (input_ids, output_ids) tuples from __getitem__
-               Each item: (input_ids[L_in], output_ids[L_out])
+    max_input_len = max(len(x) for x in input_ids_list)
+    max_output_len = max(len(x) for x in output_ids_list)
 
-    Returns:
-        Dictionary with padded tensors and attention masks:
-        - input_ids: [batch_size, max_input_len] - Padded input sequences
-        - output_ids: [batch_size, max_output_len] - Padded output sequences
-        - attention_mask: [batch_size, max_input_len] - Input padding mask (1=real, 0=pad)
-        - decoder_attention_mask: [batch_size, max_output_len] - Output padding mask (1=real, 0=pad)
-    """
-    input_ids_list = [item[0] for item in batch]
-    output_ids_list = [item[1] for item in batch]
+    B = len(batch)
 
-    # Find max lengths
-    max_input_len = max(len(ids) for ids in input_ids_list)
-    max_output_len = max(len(ids) for ids in output_ids_list)
+    padded_inputs = np.full((B, max_input_len), input_pad_id)
+    padded_outputs = np.full((B, max_output_len), output_pad_id)
 
-    # Pad sequences
-    batch_size = len(batch)
-    padded_inputs = np.full((batch_size, max_input_len), input_pad_id, dtype=np.int64)
-    padded_outputs = np.full(
-        (batch_size, max_output_len), output_pad_id, dtype=np.int64
-    )
+    input_masks = np.zeros((B, max_input_len))
+    output_masks = np.zeros((B, max_output_len))
 
-    input_masks = np.zeros((batch_size, max_input_len), dtype=np.int64)
-    output_masks = np.zeros((batch_size, max_output_len), dtype=np.int64)
-
-    for i, (input_ids, output_ids) in enumerate(batch):
-        input_len = len(input_ids)
-        output_len = len(output_ids)
-
-        padded_inputs[i, :input_len] = input_ids
-        padded_outputs[i, :output_len] = output_ids
-
-        input_masks[i, :input_len] = 1
-        output_masks[i, :output_len] = 1
+    for i, (inp, out) in enumerate(batch):
+        padded_inputs[i, :len(inp)] = inp
+        padded_outputs[i, :len(out)] = out
+        input_masks[i, :len(inp)] = 1
+        output_masks[i, :len(out)] = 1
 
     return {
-        "input_ids": torch.from_numpy(padded_inputs),
-        "output_ids": torch.from_numpy(padded_outputs),
-        "attention_mask": torch.from_numpy(input_masks),
-        "decoder_attention_mask": torch.from_numpy(output_masks),
+        "input_ids": torch.tensor(padded_inputs, dtype=torch.long),
+        "attention_mask": torch.tensor(input_masks, dtype=torch.long),
+        "output_ids": torch.tensor(padded_outputs, dtype=torch.long),
+        "decoder_attention_mask": torch.tensor(output_masks, dtype=torch.long),
     }
