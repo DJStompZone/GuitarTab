@@ -5,7 +5,6 @@ Runs autoregressive generation and computes accuracy metrics.
 """
 
 import os
-import json
 import torch
 import hydra
 from omegaconf import DictConfig
@@ -13,16 +12,8 @@ from torch.utils.data import DataLoader
 from functools import partial
 
 from src.model import FrettingTransformer
-from src.metrics import generate_and_compute_accuracy, compute_postprocessing_metrics
+from src.metrics import generate_and_compute_accuracy
 from src.dataloader import create_dataset, create_dataloader
-from src.postprocessing_bridge import PostProcessingBridge
-from fretting_postprocessor import GuitarConfig
-from fretting_postprocessor.config import (
-    STANDARD_TUNING,
-    DROP_D_TUNING,
-    HALF_STEP_DOWN,
-    FULL_STEP_DOWN
-)
 
 
 def load_checkpoint(checkpoint_path: str, model, device: str):
@@ -36,34 +27,6 @@ def load_checkpoint(checkpoint_path: str, model, device: str):
     print(f"  Val loss: {checkpoint['val_loss']:.4f}")
 
     return model
-
-
-def create_guitar_config(cfg) -> GuitarConfig:
-    """
-    Create GuitarConfig from Hydra configuration.
-
-    Args:
-        cfg: Hydra config with postprocessing.guitar settings
-
-    Returns:
-        GuitarConfig for post-processor
-    """
-    tuning_map = {
-        'standard': STANDARD_TUNING,
-        'drop_d': DROP_D_TUNING,
-        'half_step_down': HALF_STEP_DOWN,
-        'full_step_down': FULL_STEP_DOWN,
-    }
-
-    tuning = tuning_map.get(cfg.postprocessing.guitar.tuning, STANDARD_TUNING)
-
-    return GuitarConfig(
-        num_strings=cfg.postprocessing.guitar.num_strings,
-        tuning=tuning,
-        capo_fret=cfg.postprocessing.guitar.capo_fret,
-        min_fret=cfg.postprocessing.guitar.min_fret,
-        max_fret=cfg.postprocessing.guitar.max_fret
-    )
 
 
 @hydra.main(version_base=None, config_path="configs", config_name="inference")
@@ -80,7 +43,7 @@ def main(cfg: DictConfig):
     # Use test split by default for inference
     if cfg.data.selected_files_json is None:
         print("No selected_files_json specified, using test split by default...")
-        cfg.data.selected_files_json = "data_splits/test_files.json"
+        cfg.data.selected_files_json = "data_splits/mini_test_files.json"
 
     # Create dataset
     print(f"Loading dataset from {cfg.data.selected_files_json}")
@@ -136,109 +99,108 @@ def main(cfg: DictConfig):
         output_vocab=dataset.output_vocab,
         device=device,
         max_length=cfg.training.get('ar_eval_max_length', 1024),
-        num_beams=cfg.training.get('ar_eval_num_beams', 1),  # Ignored but kept for compat
+        num_beams=cfg.training.get('ar_eval_num_beams', 1),
         max_batches=cfg.get('max_eval_batches', None),  # None = all batches
         use_teacher_forcing=cfg.training.get('ar_eval_use_teacher_forcing', True),  # NEW
-        temperature=cfg.training.get('ar_eval_temperature', 1.0),  # NEW
+        temperature=cfg.training.get('ar_eval_temperature', 1.0)
     )
 
-    # Post-processing integration
-    if cfg.postprocessing.enabled:
-        print("\n" + "=" * 80)
-        print(f"Applying Post-Processing ({cfg.postprocessing.method})")
-        print("=" * 80)
-
-        # Create output directory
-        os.makedirs(cfg.output_dir, exist_ok=True)
-
-        # Initialize bridge
-        guitar_config = create_guitar_config(cfg)
-        bridge = PostProcessingBridge(
-            dataset.input_vocab,
-            dataset.output_vocab,
-            guitar_config
-        )
-
-        # Batch post-processing
-        postprocessed_predictions = bridge.process_batch(
-            input_ids=input_ids,
-            predictions=predictions,
-            method=cfg.postprocessing.method
-        )
-
-        # Compute comparison metrics
-        pp_metrics = compute_postprocessing_metrics(
-            raw_predictions=predictions,
-            postprocessed_predictions=postprocessed_predictions,
-            targets=targets,
-            output_vocab=dataset.output_vocab,
-            method=cfg.postprocessing.method
-        )
-
-        # Display results
-        if cfg.postprocessing.verbose:
-            print(f"\nPost-Processing Results:")
-            print(f"  Raw Model     - Pitch: {pp_metrics.raw_pitch_accuracy:.2%}, Tab: {pp_metrics.raw_tab_accuracy:.2%}")
-            print(f"  Post-Processed - Pitch: {pp_metrics.post_pitch_accuracy:.2%}, Tab: {pp_metrics.post_tab_accuracy:.2%}")
-            print(f"  Improvement   - Pitch: {pp_metrics.pitch_improvement:+.2%}, Tab: {pp_metrics.tab_improvement:+.2%}")
-
-        # Save results
-        if cfg.postprocessing.save_intermediate:
-            raw_predictions_file = os.path.join(cfg.output_dir, "raw_predictions.pt")
-            torch.save(predictions, raw_predictions_file)
-            print(f"\nSaved raw predictions to: {raw_predictions_file}")
-
-        postprocessed_file = os.path.join(cfg.output_dir, "postprocessed_predictions.pt")
-        torch.save(postprocessed_predictions, postprocessed_file)
-        print(f"Saved post-processed predictions to: {postprocessed_file}")
-
-        comparison_file = os.path.join(cfg.output_dir, "postprocessing_comparison.json")
-        with open(comparison_file, 'w') as f:
-            json.dump({
-                'method': pp_metrics.method,
-                'raw_metrics': {
-                    'token_accuracy': pp_metrics.raw_token_accuracy,
-                    'pitch_accuracy': pp_metrics.raw_pitch_accuracy,
-                    'tab_accuracy': pp_metrics.raw_tab_accuracy,
-                },
-                'postprocessed_metrics': {
-                    'token_accuracy': pp_metrics.post_token_accuracy,
-                    'pitch_accuracy': pp_metrics.post_pitch_accuracy,
-                    'tab_accuracy': pp_metrics.post_tab_accuracy,
-                },
-                'improvements': {
-                    'token': pp_metrics.token_improvement,
-                    'pitch': pp_metrics.pitch_improvement,
-                    'tab': pp_metrics.tab_improvement,
-                },
-                'counts': {
-                    'total_tokens': pp_metrics.total_tokens,
-                    'total_notes': pp_metrics.total_notes,
-                }
-            }, f, indent=2)
-        print(f"Saved comparison metrics to: {comparison_file}")
-
-        # Update predictions to post-processed version
-        predictions = postprocessed_predictions
-        print("\nFinal predictions are post-processed.")
+    print(input_ids.shape, targets.shape, predictions.shape)
 
     # Save predictions and targets
+    os.makedirs(cfg.output_dir, exist_ok=True)
+    input_ids_file = os.path.join(cfg.output_dir, "input_ids.pt")
+    targets_file = os.path.join(cfg.output_dir, "targets.pt")
+    predictions_file = os.path.join(cfg.output_dir, "predictions.pt")
+    torch.save(input_ids, input_ids_file)
+    torch.save(targets, targets_file)
+    torch.save(predictions, predictions_file)
 
 
-    print(f"\nResults:")
+    print(f"\nResults (Before Post-Processing):")
     print(f"  Token Accuracy:  {metrics.token_accuracy:.2%}")
     print(f"  Pitch Accuracy:  {metrics.pitch_accuracy:.2%}")
     print(f"  Tab Accuracy:    {metrics.tab_accuracy:.2%}")
     print(f"  Total Tokens:    {metrics.total_tokens:,}")
     print(f"  Total Notes:     {metrics.total_notes:,}")
 
-    os.makedirs(cfg.output_dir, exist_ok=True)
-    input_ids_file = cfg.output_dir  + "/input_ids.pt"
-    targets_file = cfg.output_dir + "/targets.pt"
-    predictions_file = cfg.output_dir + "/predictions.pt"
-    torch.save(input_ids, input_ids_file)
-    torch.save(targets, targets_file)
-    torch.save(predictions, predictions_file)
+    # ========================================================================
+    # Post-Processing
+    # ========================================================================
+    from tqdm import tqdm
+    from src.post_processing import post_process_pitch_alignment
+    from src.metrics import compute_tablature_accuracy
+
+    print("\n" + "=" * 80)
+    print("Applying pitch alignment post-processing...")
+    print("=" * 80)
+
+    # Get the vocabularies from the dataset object
+    input_vocab = dataset.input_vocab
+    output_vocab = dataset.output_vocab
+    
+    aligned_predictions = []
+    
+    # Convert tensors to lists for easier iteration
+    input_ids_list = input_ids.cpu().tolist()
+    predictions_list = predictions.cpu().tolist()
+    
+    for i in tqdm(range(len(predictions_list)), desc="Post-processing segments"):
+        single_input_ids = input_ids_list[i]
+        single_pred_ids = predictions_list[i]
+        
+        # Un-pad sequences before sending to alignment for efficiency
+        try:
+            input_end_idx = single_input_ids.index(input_vocab.pad_id)
+            input_tokens = single_input_ids[:input_end_idx]
+        except ValueError:
+            input_tokens = single_input_ids
+
+        try:
+            pred_end_idx = single_pred_ids.index(output_vocab.pad_id)
+            pred_tokens = single_pred_ids[:pred_end_idx]
+        except ValueError:
+            pred_tokens = single_pred_ids
+
+        # Apply alignment
+        aligned_ids = post_process_pitch_alignment(
+            input_ids=input_tokens,
+            pred_ids=pred_tokens,
+            input_vocab=input_vocab,
+            output_vocab=output_vocab
+        )
+        aligned_predictions.append(aligned_ids)
+
+    # Re-pad the aligned predictions to match the target tensor shape for metric calculation
+    max_len = targets.shape[1]
+    padded_aligned_predictions = torch.full_like(targets, output_vocab.pad_id)
+    for i, seq in enumerate(aligned_predictions):
+        seq_len = min(len(seq), max_len)
+        padded_aligned_predictions[i, :seq_len] = torch.tensor(seq[:seq_len], dtype=torch.long)
+
+    # Move to the correct device
+    padded_aligned_predictions = padded_aligned_predictions.to(device)
+
+    # Save the aligned predictions
+    aligned_predictions_file = os.path.join(cfg.output_dir, "predictions_aligned.pt")
+    torch.save(padded_aligned_predictions, aligned_predictions_file)
+    print(f"\nSaved aligned predictions to {aligned_predictions_file}")
+
+    # Compute metrics for the aligned predictions
+    print("\nComputing metrics for aligned predictions...")
+    metrics_aligned = compute_tablature_accuracy(
+        predictions=padded_aligned_predictions,
+        targets=targets,
+        output_vocab=output_vocab,
+        pad_id=output_vocab.pad_id
+    )
+
+    print(f"\nResults (After Post-Processing):")
+    print(f"  Token Accuracy:  {metrics_aligned.token_accuracy:.2%}")
+    print(f"  Pitch Accuracy:  {metrics_aligned.pitch_accuracy:.2%}")
+    print(f"  Tab Accuracy:    {metrics_aligned.tab_accuracy:.2%}")
+    print(f"  Total Tokens:    {metrics_aligned.total_tokens:,}")
+    print(f"  Total Notes:     {metrics_aligned.total_notes:,}")
 
     print("\n" + "=" * 80)
     print("Inference complete!")
