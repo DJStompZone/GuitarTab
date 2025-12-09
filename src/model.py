@@ -87,7 +87,6 @@ def create_model(
 
     return model
 
-
 class FrettingTransformer(nn.Module):
     """
     Wrapper around T5 for guitar tablature transcription.
@@ -171,7 +170,11 @@ class FrettingTransformer(nn.Module):
         input_ids: torch.Tensor,
         attention_mask: Optional[torch.Tensor] = None,
         max_length: int = 512,
-        num_beams: int = 1,
+        start_token_id: Optional[torch.Tensor] = None,
+        eos_token_id: int = 2,
+        pad_token_id: int = 0,
+        temperature: float = 1.0,
+        verbose: bool = False,
         **kwargs
     ):
         """
@@ -181,7 +184,10 @@ class FrettingTransformer(nn.Module):
             input_ids: [B, L_enc] - Encoder input token IDs
             attention_mask: [B, L_enc] - Encoder padding mask
             max_length: Maximum generation length (absolute, not relative)
-            num_beams: Number of beams for beam search (1 = greedy decoding)
+            start_token_id: [B] optional first token (teacher forcing friendly)
+            eos_token_id: end token
+            pad_token_id: fill for finished seq
+            temperature: softmax temperature
             **kwargs: Additional generation arguments (temperature, top_k, top_p, etc.)
 
         Returns:
@@ -194,10 +200,77 @@ class FrettingTransformer(nn.Module):
             - Stops at EOS token or max_length
             - For beam search (num_beams > 1), batch dimension expands
         """
-        return self.model.generate(
-            input_ids=input_ids,
-            attention_mask=attention_mask,
-            max_length=max_length,
-            num_beams=num_beams,
-            **kwargs
-        )
+
+        device = input_ids.device
+        batch_size = input_ids.size(0)
+
+        # Encode input once
+        with torch.no_grad():
+            encoder_outputs = self.model.encoder(
+                input_ids=input_ids,
+                attention_mask=attention_mask,
+                return_dict=True
+            )
+            enc_hidden = encoder_outputs.last_hidden_state
+
+        # Initialize decoder with start tokens (per-sample or BOS)
+        if start_token_id is None:
+            # default: BOS = id 1
+            start_token_id = torch.full((batch_size,), 1, dtype=torch.long, device=device)
+
+
+        # Only 1 token as initial input
+        decoder_input = start_token_id.unsqueeze(1)    # [B, 1]
+
+        # storage for output tokens
+        generated = [start_token_id]   # list of length L, each [B]
+
+        # all unfinished initially
+        finished = torch.zeros(batch_size, dtype=torch.bool, device=device)
+
+        past_key_values = None
+
+        # Autoregressive loop
+        for step in range(max_length):
+
+            with torch.no_grad():
+                # decoder_input contains ONLY the newest token each step after first
+                decoder_outputs = self.model.decoder(
+                    input_ids=decoder_input,                # [B, 1]
+                    encoder_hidden_states=enc_hidden,       # [B, L_enc, d]
+                    encoder_attention_mask=attention_mask,  # [B, L_enc]
+                    past_key_values=past_key_values,
+                    use_cache=True,
+                    return_dict=True,
+                )
+
+                # update KV cache
+                past_key_values = decoder_outputs.past_key_values
+
+                # logits for current step token only
+                hidden = decoder_outputs.last_hidden_state     # [B, 1, d_model]
+                logits = self.model.lm_head(hidden[:, -1, :])  # [B, vocab]
+
+                if temperature != 1.0:
+                    logits = logits / temperature
+
+                next_token = torch.argmax(logits, dim=-1)      # [B]
+
+            # apply EOS
+            finished |= (next_token == eos_token_id)
+            next_token = torch.where(finished, pad_token_id, next_token)
+
+            generated.append(next_token)
+
+            # Early stop if all done
+            if finished.all():
+                if verbose:
+                    print(f"[generate] Finished at step {step}.")
+                break
+
+            # next decoder input is just this newly predicted token
+            decoder_input = next_token.unsqueeze(1)   # shape [B, 1]
+
+        # Stack outputs
+        generated = torch.stack(generated, dim=1)  # [B, L_gen]
+        return generated

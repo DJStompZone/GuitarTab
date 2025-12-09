@@ -19,6 +19,9 @@ class TabAccuracyMetrics:
     pitch_accuracy: float  # % of NOTE_ON with correct pitch
     tab_accuracy: float  # % of NOTE_ON with correct (string, fret)
 
+    # playability score (difficulty)
+    difficulty: float
+
     # Counts
     total_tokens: int
     total_notes: int
@@ -31,16 +34,11 @@ class TabAccuracyMetrics:
             f"({self.total_notes} notes, {self.total_tokens} tokens)"
         )
 
-
 def compute_tablature_accuracy(
-<<<<<<< HEAD
     predictions: torch.Tensor,
     targets: torch.Tensor,
     output_vocab,
     # pad_id: int = -100 # 0
-=======
-    predictions: torch.Tensor, targets: torch.Tensor, output_vocab, pad_id: int = 0
->>>>>>> 09d4c4180b96ba2ad91423d206d589f6fc4531fc
 ) -> TabAccuracyMetrics:
     """
     Compute accuracy metrics for tablature transcription.
@@ -73,6 +71,10 @@ def compute_tablature_accuracy(
     # Decode tokens to strings
     pred_tokens = [output_vocab.id_to_token[idx.item()] for idx in pred_flat]
     target_tokens = [output_vocab.id_to_token[idx.item()] for idx in target_flat]
+
+    # playability score
+    tab_positions = extract_tab_positions(pred_tokens)
+    difficulty = difficulty_score(tab_positions)
 
     # Note-level accuracy (only NOTE_ON positions)
     note_positions = [
@@ -119,10 +121,10 @@ def compute_tablature_accuracy(
         token_accuracy=token_accuracy,
         pitch_accuracy=pitch_accuracy,
         tab_accuracy=tab_accuracy,
+        difficulty=difficulty,
         total_tokens=total_tokens,
         total_notes=len(note_positions),
     )
-
 
 def generate_and_compute_accuracy(
     model,
@@ -130,8 +132,10 @@ def generate_and_compute_accuracy(
     output_vocab,
     device: str,
     max_length: int = 1024,
-    num_beams: int = 1,
+    num_beams: int = 1,  # DEPRECATED (kept for config compat)
     max_batches: Optional[int] = None,
+    use_teacher_forcing: bool = True,  # NEW
+    temperature: float = 1.0,  # NEW
 ) -> tuple[TabAccuracyMetrics, tuple[torch.Tensor, torch.Tensor, torch.Tensor]]:
     """
     Generate sequences autoregressively and compute accuracy.
@@ -155,6 +159,7 @@ def generate_and_compute_accuracy(
     all_input_ids = []
     all_targets = []
 
+    # Determine total batches for progress bar
     total_batches = max_batches if max_batches is not None else len(dataloader)
     print("max_batches", max_batches)
 
@@ -163,54 +168,45 @@ def generate_and_compute_accuracy(
             enumerate(dataloader), total=total_batches, desc="Generating sequences"
         )
         for batch_idx, batch in pbar:
-
             if max_batches is not None and batch_idx >= max_batches:
                 break
 
+            # Get inputs
             input_ids = batch["input_ids"].to(device)
             attention_mask = batch["attention_mask"].to(device)
+            target_ids = batch["output_ids"].to(device)
 
-            # Get inputs
-            output_ids = batch["output_ids"].to(device)           # [B, L_out]
-            target_ids = output_ids[:, 1:].clone()                # remove BOS
-            target_ids[target_ids == 0] = output_vocab.pad_id     # pad=0
-            
-            # Generate (autoregressive)
+            # Extract first target token per sample for teacher forcing
+            if use_teacher_forcing:
+                start_token_id = target_ids[:, 0]  # [B] - per-sample first tokens
+            else:
+                start_token_id = None  # Will use BOS=1
+
+            # Generate (now uses custom implementation)
             generated = model.generate(
                 input_ids=input_ids,
                 attention_mask=attention_mask,
                 max_length=max_length,
-                num_beams=num_beams,
+                start_token_id=start_token_id,
+                eos_token_id=output_vocab.eos_id if hasattr(output_vocab, "eos_id") else 2,
                 pad_token_id=output_vocab.pad_id,
-                eos_token_id=output_vocab.eos_id
-<<<<<<< HEAD
-=======
-                if hasattr(output_vocab, "eos_id")
-                else None,
->>>>>>> 09d4c4180b96ba2ad91423d206d589f6fc4531fc
+                temperature=temperature,
+                verbose=False
             )
-
-            # remove BOS
-            generated = generated[:, 1:]
 
             # Pad/trim both generated and targets to max_length for uniform shape
             B = target_ids.shape[0]
-            target_len = target_ids.shape[1]
             gen_len = generated.shape[1]
+            target_len = target_ids.shape[1]
 
-            # Trim or pad generated to match target_len
-            if gen_len > target_len:
-                generated = generated[:, :target_len]
-            elif gen_len < target_len:
-                pad = torch.full(
-                    (B, target_len - gen_len),
+            # Pad or trim generated to max_length
+            if gen_len < max_length:
+                padding = torch.full(
+                    (B, max_length - gen_len),
                     output_vocab.pad_id,
                     dtype=generated.dtype,
                     device=generated.device,
                 )
-<<<<<<< HEAD
-                generated = torch.cat([generated, pad], dim=1)
-=======
                 generated = torch.cat([generated, padding], dim=1)
             elif gen_len > max_length:
                 generated = generated[:, :max_length]
@@ -226,7 +222,6 @@ def generate_and_compute_accuracy(
                 target_ids = torch.cat([target_ids, padding], dim=1)
             elif target_len > max_length:
                 target_ids = target_ids[:, :max_length]
->>>>>>> 09d4c4180b96ba2ad91423d206d589f6fc4531fc
 
             # Note: input_ids also need padding for uniform concatenation
             # However, we keep them as-is since they don't need to match max_length
@@ -235,7 +230,7 @@ def generate_and_compute_accuracy(
             all_input_ids.append(input_ids)
             all_predictions.append(generated)
             all_targets.append(target_ids)
-            
+
             # Update progress bar with current batch info
             pbar.set_postfix(
                 {"batch_size": B, "gen_len": gen_len, "target_len": target_len}
@@ -245,13 +240,6 @@ def generate_and_compute_accuracy(
     predictions = torch.cat(all_predictions, dim=0)
     targets = torch.cat(all_targets, dim=0)
 
-<<<<<<< HEAD
-    # Compute accuracy
-    metrics = compute_tablature_accuracy(
-        predictions=predictions,
-        targets=targets,
-        output_vocab=output_vocab
-=======
     # Pad input_ids to uniform length across batches
     max_input_len = max(inp.shape[1] for inp in all_input_ids)
     padded_inputs = []
@@ -272,8 +260,56 @@ def generate_and_compute_accuracy(
         predictions=predictions,
         targets=targets,
         output_vocab=output_vocab,
-        pad_id=output_vocab.pad_id,
->>>>>>> 09d4c4180b96ba2ad91423d206d589f6fc4531fc
+        # pad_id=output_vocab.pad_id,
     )
 
     return metrics, (input_ids, targets, predictions)
+
+def extract_tab_positions(tokens):
+    """
+    tokens: list of string tokens like ["NOTE_ON_55", "TAB_3_0", ...]
+    return: list of (string:int, fret:int)
+    """
+    positions = []
+    for t in tokens:
+        if t.startswith("TAB_"):
+            # format: TAB_<string>_<fret>
+            _, s, f = t.split("_")
+            positions.append((int(s), int(f)))
+    return positions
+
+def difficulty_score(positions, alpha=0.25):
+    """
+    Difficulty score
+    positions: list of (string, fret)
+    return: mean difficulty score
+    """
+
+    if len(positions) < 2:
+        return 0.0
+
+    diffs = []
+
+    for (s1, f1), (s2, f2) in zip(positions[:-1], positions[1:]):
+
+        # fret stretch
+        delta_fret = f2 - f1
+        if delta_fret > 0:
+            fret_stretch = 0.50 * abs(delta_fret)
+        else:
+            fret_stretch = 0.75 * abs(delta_fret)
+
+        # locality 
+        locality = alpha * (f1 + f2)
+
+        along = fret_stretch + locality
+
+        # across
+        delta_string = abs(s2 - s1)
+        across = 0.25 if delta_string <= 1 else 0.50
+
+        difficulty = along + across
+        diffs.append(difficulty)
+
+    return sum(diffs) / len(diffs)
+

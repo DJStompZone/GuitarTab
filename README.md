@@ -51,6 +51,30 @@ Change the dir name you set in bash `python JAMS-to-MIDI.py <targetDir> <outputD
 
 Final get the 14751 midi files.
 
+## Train
+```
+bash scripts/train.sh
+```
+The training log and checkpoint will save in outputs folder.
+
+## Inference & Visualize
+```
+python inference.py +checkpoint_path=./outputs/<exp_dir>/best_model.pt
+```
+- Inference the best checkpoint model generate the tablatures and calculate the metrics scores below.
+  - Token accuracy
+  - Pitch accuracy
+  - Tab accuacy
+  - Difficulty
+- After that will visualize few sample for generate tab & groundtruth tab.
+
+
+## Plot Loss Curve
+```
+python plot_loss.py
+```
+change `json_path` in plot_loss.py for your training log folder path. The loss_curve picture will save in your training log folder.
+
 ## DadaGP Dataset
 ### Token
 ```
