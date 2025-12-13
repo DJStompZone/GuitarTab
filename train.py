@@ -25,7 +25,7 @@ from src.dataloader import create_dataset, create_dataloader
 from src.training_logger import TrainingLogger, save_generated_samples
 
 
-from typing import TypeAlias
+from typing_extensions import TypeAlias
 from src.tab_dataset import TabDatasetBatchInput
 
 
@@ -73,6 +73,7 @@ def create_dataloaders(cfg: DictConfig) -> tuple[DataLoader, DataLoader, DataLoa
             max_time_shift=cfg.data.max_time_shift,
             num_strings=cfg.data.num_strings,
             num_frets=cfg.data.num_frets,
+            output_format=cfg.data.get('output_format', 'v1'),
             max_files=cfg.data.max_files
         )
 
@@ -85,6 +86,7 @@ def create_dataloaders(cfg: DictConfig) -> tuple[DataLoader, DataLoader, DataLoa
             max_time_shift=cfg.data.max_time_shift,
             num_strings=cfg.data.num_strings,
             num_frets=cfg.data.num_frets,
+            output_format=cfg.data.get('output_format', 'v1'),
             max_files=None
         )
 
@@ -97,6 +99,7 @@ def create_dataloaders(cfg: DictConfig) -> tuple[DataLoader, DataLoader, DataLoa
             max_time_shift=cfg.data.max_time_shift,
             num_strings=cfg.data.num_strings,
             num_frets=cfg.data.num_frets,
+            output_format=cfg.data.get('output_format', 'v1'),
             max_files=None
         )
 
@@ -113,6 +116,7 @@ def create_dataloaders(cfg: DictConfig) -> tuple[DataLoader, DataLoader, DataLoa
             max_time_shift=cfg.data.max_time_shift,
             num_strings=cfg.data.num_strings,
             num_frets=cfg.data.num_frets,
+            output_format=cfg.data.get('output_format', 'v1'),
             max_files=cfg.data.max_files
         )
 

@@ -86,6 +86,7 @@ def compute_tablature_accuracy(
             token_accuracy=token_accuracy,
             pitch_accuracy=0.0,
             tab_accuracy=0.0,
+            difficulty=0.0,
             total_tokens=total_tokens,
             total_notes=0,
         )

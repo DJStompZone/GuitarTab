@@ -9,6 +9,8 @@ pip install -r requirement.txt
 
 ## Check [docs/UPDATES.md](docs/UPDATES.md) for new documentation
 
+## Check [docs/OUTPUT_FORMAT.md](docs/OUTPUT_FORMAT.md) for output token format
+
 ## Codebase
 ```
 Project

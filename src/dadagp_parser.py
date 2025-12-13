@@ -234,15 +234,22 @@ def compute_pitch(string: int, fret: int, downtune: int = 0) -> int:
 
 def dadagp_to_events(
     dadagp_tokens: list[DadaGPToken],
+    output_format: str = "v1",
 ) -> tuple[list[Event], list[Event], list[tuple[int, int]]]:
     """
     Transform DadaGP tokens to our event format.
 
-    Input sequence:  NOTE_ON, NOTE_OFF, TIME_SHIFT
-    Output sequence: NOTE_ON, NOTE_OFF, TIME_SHIFT, TAB
+    Input/Output sequence depends on output_format:
+        v1: input = NOTE_ON, NOTE_OFF, TIME_SHIFT; output = NOTE_ON, TAB, NOTE_OFF, TIME_SHIFT
+        v2: input = NOTE_ON, NOTE_OFF, TIME_SHIFT; output = TAB, TIME_SHIFT
+        v3: input = NOTE_ON, TIME_SHIFT; output = NOTE_ON, TAB, TIME_SHIFT (no NOTE_OFF)
 
     Args:
         dadagp_tokens: List of parsed DadaGP tokens
+        output_format: "v1", "v2", or "v3"
+            - v1: input = NOTE_ON, NOTE_OFF, TIME_SHIFT; output = NOTE_ON, TAB, NOTE_OFF, TIME_SHIFT
+            - v2: input = NOTE_ON, NOTE_OFF, TIME_SHIFT; output = TAB, TIME_SHIFT
+            - v3: input = NOTE_ON, TIME_SHIFT; output = NOTE_ON, TAB, TIME_SHIFT (no NOTE_OFF)
 
     Returns:
         Tuple of (input_events, output_events, bar_positions)
@@ -291,11 +298,14 @@ def dadagp_to_events(
             # Compute pitch
             pitch = compute_pitch(token.string, token.fret, metadata.downtune)
 
-            # Add NOTE_ON event
+            # Add NOTE_ON event to input (always)
             input_events.append(NoteOnEvent(pitch=pitch))
-            output_events.append(NoteOnEvent(pitch=pitch))
 
-            # Add TAB event to output only
+            # Add events to output based on format
+            if output_format in ("v1", "v3"):
+                # v1/v3: NOTE_ON + TAB
+                output_events.append(NoteOnEvent(pitch=pitch))
+            # TAB event is always added to output
             output_events.append(TabEvent(string=token.string, fret=token.fret))
 
             # Track this note as active
@@ -312,13 +322,17 @@ def dadagp_to_events(
             # Turn off all active notes (simplification: assume all notes end at wait)
             # This is a reasonable assumption for guitar tablature
             for note in active_notes:
-                input_events.append(NoteOffEvent(pitch=note.pitch))
-                output_events.append(NoteOffEvent(pitch=note.pitch))
+                # NOTE_OFF to input (not for v3)
+                if output_format != "v3":
+                    input_events.append(NoteOffEvent(pitch=note.pitch))
+                # NOTE_OFF to output (only in v1)
+                if output_format == "v1":
+                    output_events.append(NoteOffEvent(pitch=note.pitch))
 
             # Clear active notes
             active_notes = []
 
-            # Add TIME_SHIFT
+            # Add TIME_SHIFT (always for both input and output)
             input_events.append(TimeShiftEvent(delta=token.ticks))
             output_events.append(TimeShiftEvent(delta=token.ticks))
 
@@ -327,13 +341,20 @@ def dadagp_to_events(
 
     # Turn off any remaining active notes at the end
     for note in active_notes:
-        input_events.append(NoteOffEvent(pitch=note.pitch))
-        output_events.append(NoteOffEvent(pitch=note.pitch))
+        # NOTE_OFF to input (not for v3)
+        if output_format != "v3":
+            input_events.append(NoteOffEvent(pitch=note.pitch))
+        # NOTE_OFF to output (only in v1)
+        if output_format == "v1":
+            output_events.append(NoteOffEvent(pitch=note.pitch))
 
     return input_events, output_events, bar_positions
 
 
-def parse_dadagp_file_to_events(file_path: str) -> tuple[list[Event], list[Event], list[tuple[int, int]]]:
+def parse_dadagp_file_to_events(
+    file_path: str,
+    output_format: str = "v1",
+) -> tuple[list[Event], list[Event], list[tuple[int, int]]]:
     """
     Parse DadaGP tokens file and convert to our event format.
 
@@ -341,10 +362,14 @@ def parse_dadagp_file_to_events(file_path: str) -> tuple[list[Event], list[Event
 
     Args:
         file_path: Path to .tokens.txt file
+        output_format: "v1", "v2", or "v3"
+            - v1: input = NOTE_ON, NOTE_OFF, TIME_SHIFT; output = NOTE_ON, TAB, NOTE_OFF, TIME_SHIFT
+            - v2: input = NOTE_ON, NOTE_OFF, TIME_SHIFT; output = TAB, TIME_SHIFT
+            - v3: input = NOTE_ON, TIME_SHIFT; output = NOTE_ON, TAB, TIME_SHIFT (no NOTE_OFF)
 
     Returns:
         Tuple of (input_events, output_events, bar_positions)
         bar_positions: List of (input_idx, output_idx) where each bar starts
     """
     tokens = parse_dadagp_file(file_path)
-    return dadagp_to_events(tokens)
+    return dadagp_to_events(tokens, output_format=output_format)

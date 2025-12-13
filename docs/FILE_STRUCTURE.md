@@ -16,6 +16,7 @@ GuitarTab/
 │   ├── val_files.json
 │   └── test_files.json
 ├── docs/
+│   ├── OUTPUT_FORMAT.md - Output format (v1/v2) configuration guide
 ├── DadaGP-v1.1/
 ├── notebooks/
 ├── outputs/

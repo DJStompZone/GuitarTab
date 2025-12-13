@@ -20,9 +20,12 @@ val_ratio: 0.1
 test_ratio: 0.1
 
 # DataLoader settings
-batch_size: 32
+batch_size: 256
 num_workers: 4
 pin_memory: true
 
 # Limit number of files (applied after filtering)
 max_files: null  # null = use all selected files
+
+# output token format
+# output_format: "v2"

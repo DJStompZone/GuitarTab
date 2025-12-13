@@ -49,6 +49,7 @@ def build_vocabulary(
     max_time_shift: int = 500,
     num_strings: int = 6,
     num_frets: int = 21,
+    output_format: str = "v1",
 ) -> tuple[Vocabulary, Vocabulary]:
     """
     Build vocabularies for input and output sequences.
@@ -58,6 +59,10 @@ def build_vocabulary(
         max_time_shift: Maximum time shift value
         num_strings: Number of guitar strings
         num_frets: Number of frets
+        output_format: "v1", "v2", or "v3"
+            - v1: input = NOTE_ON, NOTE_OFF, TIME_SHIFT; output = NOTE_ON, TAB, NOTE_OFF, TIME_SHIFT
+            - v2: input = NOTE_ON, NOTE_OFF, TIME_SHIFT; output = TAB, TIME_SHIFT
+            - v3: input = NOTE_ON, TIME_SHIFT; output = NOTE_ON, TAB, TIME_SHIFT (no NOTE_OFF)
 
     Returns:
         Tuple of (input_vocab, output_vocab)
@@ -80,12 +85,13 @@ def build_vocabulary(
         input_id_to_token[idx] = token
         idx += 1
 
-    # NOTE_OFF tokens
-    for pitch in range(max_pitch + 1):
-        token = f"NOTE_OFF_{pitch}"
-        input_token_to_id[token] = idx
-        input_id_to_token[idx] = token
-        idx += 1
+    # NOTE_OFF tokens (not for v3)
+    if output_format != "v3":
+        for pitch in range(max_pitch + 1):
+            token = f"NOTE_OFF_{pitch}"
+            input_token_to_id[token] = idx
+            input_id_to_token[idx] = token
+            idx += 1
 
     # TIME_SHIFT tokens
     for shift in range(1, max_time_shift + 1):
@@ -104,39 +110,44 @@ def build_vocabulary(
         unk_id=3,
     )
 
-    # Build output vocabulary (NOTE_ON, NOTE_OFF, TIME_SHIFT, TAB)
+    # Build output vocabulary based on output_format
+    # v1: NOTE_ON, NOTE_OFF, TIME_SHIFT, TAB
+    # v2: TAB, TIME_SHIFT only (no NOTE_ON/OFF)
+    # v3: NOTE_ON, TIME_SHIFT, TAB (no NOTE_OFF)
     output_token_to_id: dict[str, int] = {}
     output_id_to_token: dict[int, str] = {}
     idx = 0
 
-    # Special tokens
+    # Special tokens (always present)
     for token in ["PAD", "BOS", "EOS", "UNK"]:
         output_token_to_id[token] = idx
         output_id_to_token[idx] = token
         idx += 1
 
-    # NOTE_ON tokens
-    for pitch in range(max_pitch + 1):
-        token = f"NOTE_ON_{pitch}"
-        output_token_to_id[token] = idx
-        output_id_to_token[idx] = token
-        idx += 1
+    if output_format in ("v1", "v3"):
+        # NOTE_ON tokens (for v1 and v3)
+        for pitch in range(max_pitch + 1):
+            token = f"NOTE_ON_{pitch}"
+            output_token_to_id[token] = idx
+            output_id_to_token[idx] = token
+            idx += 1
 
-    # NOTE_OFF tokens
-    for pitch in range(max_pitch + 1):
-        token = f"NOTE_OFF_{pitch}"
-        output_token_to_id[token] = idx
-        output_id_to_token[idx] = token
-        idx += 1
+    if output_format == "v1":
+        # NOTE_OFF tokens (only for v1)
+        for pitch in range(max_pitch + 1):
+            token = f"NOTE_OFF_{pitch}"
+            output_token_to_id[token] = idx
+            output_id_to_token[idx] = token
+            idx += 1
 
-    # TIME_SHIFT tokens
+    # TIME_SHIFT tokens (always present)
     for shift in range(1, max_time_shift + 1):
         token = f"TIME_SHIFT_{shift}"
         output_token_to_id[token] = idx
         output_id_to_token[idx] = token
         idx += 1
 
-    # TAB tokens
+    # TAB tokens (always present)
     for string in range(1, num_strings + 1):
         for fret in range(num_frets):
             token = f"TAB_{string}_{fret}"
@@ -263,6 +274,7 @@ class TabDataset:
         max_time_shift: int = 500,
         num_strings: int = 6,
         num_frets: int = 21,
+        output_format: str = "v1",
     ):
         """
         Initialize dataset.
@@ -274,17 +286,33 @@ class TabDataset:
             max_time_shift: Maximum time shift value
             num_strings: Number of guitar strings
             num_frets: Number of frets
+            output_format: "v1", "v2", or "v3"
+                - v1: input = NOTE_ON, NOTE_OFF, TIME_SHIFT; output = NOTE_ON, TAB, NOTE_OFF, TIME_SHIFT
+                - v2: input = NOTE_ON, NOTE_OFF, TIME_SHIFT; output = TAB, TIME_SHIFT
+                - v3: input = NOTE_ON, TIME_SHIFT; output = NOTE_ON, TAB, TIME_SHIFT (no NOTE_OFF)
         """
         self.token_files = token_files
         self.max_sequence_length = max_sequence_length
+        self.output_format = output_format
 
         # Build vocabularies
         print("Building vocabularies...")
+
+        # Format descriptions for clarity
+        format_descriptions = {
+            "v1": "NOTE_ON, TAB, NOTE_OFF, TIME_SHIFT",
+            "v2": "TAB, TIME_SHIFT",
+            "v3": "NOTE_ON, TAB, TIME_SHIFT",
+        }
+        format_desc = format_descriptions.get(output_format, "unknown")
+        print(f"Output format: {output_format} ({format_desc})")
+
         self.input_vocab, self.output_vocab = build_vocabulary(
             max_pitch=max_pitch,
             max_time_shift=max_time_shift,
             num_strings=num_strings,
             num_frets=num_frets,
+            output_format=output_format,
         )
 
         print(f"Input vocab size: {self.input_vocab.vocab_size}")
@@ -312,7 +340,8 @@ class TabDataset:
 
                 # Convert to events with bar positions
                 input_events, output_events, bar_positions = dadagp_to_events(
-                    dadagp_tokens
+                    dadagp_tokens,
+                    output_format=self.output_format,
                 )
 
                 # Convert to IDs
