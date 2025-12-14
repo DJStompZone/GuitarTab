@@ -119,6 +119,7 @@ def main(cfg: DictConfig):
         max_time_shift=cfg.data.max_time_shift,
         num_strings=cfg.data.num_strings,
         num_frets=cfg.data.num_frets,
+        output_format=cfg.data.get('output_format', 'v1'),
         max_files=cfg.data.get('max_files', None)
     )
 
@@ -189,7 +190,7 @@ def main(cfg: DictConfig):
     print(f"  Total Tokens:    {metrics.total_tokens:,}")
     print(f"  Total Notes:     {metrics.total_notes:,}")
 
-    # breakpoint()
+
     # ======================================================================
     # VISUALIZATION
     # Show ground truth vs predicted tablature for a few samples

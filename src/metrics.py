@@ -3,10 +3,12 @@ Evaluation metrics for guitar tablature transcription.
 """
 
 from dataclasses import dataclass
-from typing import Optional
+from typing import Optional, List, Tuple
 import torch
 from tqdm import tqdm
 
+# Standard tuning: E2, A2, D3, G3, B3, E4
+GUITAR_TUNING = [40, 45, 50, 55, 59, 64]
 
 @dataclass
 class TabAccuracyMetrics:
@@ -15,9 +17,11 @@ class TabAccuracyMetrics:
     # Token-level accuracy
     token_accuracy: float  # % of all tokens correct
 
-    # Note-level accuracy (only on NOTE_ON positions)
-    pitch_accuracy: float  # % of NOTE_ON with correct pitch
-    tab_accuracy: float  # % of NOTE_ON with correct (string, fret)
+    # Note-level accuracy
+    # v1: based on NOTE_ON positions
+    # v2: based on TAB positions
+    pitch_accuracy: float  # % of notes with correct pitch
+    tab_accuracy: float  # % of notes with correct (string, fret)
 
     # playability score (difficulty)
     difficulty: float
@@ -31,8 +35,49 @@ class TabAccuracyMetrics:
             f"Token Acc: {self.token_accuracy:.2%} | "
             f"Pitch Acc: {self.pitch_accuracy:.2%} | "
             f"Tab Acc: {self.tab_accuracy:.2%} | "
+            f"Lev Sim: {self.levenshtein_similarity:.2%} | "
             f"({self.total_notes} notes, {self.total_tokens} tokens)"
         )
+
+def compute_levenshtein_distance(s1, s2):
+    """
+    Compute Levenshtein distance between two sequences.
+    """
+    if len(s1) < len(s2):
+        return compute_levenshtein_distance(s2, s1)
+
+    if len(s2) == 0:
+        return len(s1)
+
+    previous_row = range(len(s2) + 1)
+    for i, c1 in enumerate(s1):
+        current_row = [i + 1]
+        for j, c2 in enumerate(s2):
+            insertions = previous_row[j + 1] + 1
+            deletions = current_row[j] + 1
+            substitutions = previous_row[j] + (c1 != c2)
+            current_row.append(min(insertions, deletions, substitutions))
+        previous_row = current_row
+
+    return previous_row[-1]
+
+def compute_pitch_from_tab_token(token_str: str) -> int:
+    """
+    Compute MIDI pitch from a TAB token string (e.g., 'TAB_3_5').
+    Returns -1 if invalid.
+    """
+    if not token_str.startswith("TAB_"):
+        return -1
+    try:
+        _, s, f = token_str.split("_")
+        string_idx = int(s)
+        fret = int(f)
+        # string is 1-indexed (1-6)
+        if 1 <= string_idx <= len(GUITAR_TUNING):
+            return GUITAR_TUNING[string_idx - 1] + fret
+    except ValueError:
+        pass
+    return -1
 
 def compute_tablature_accuracy(
     predictions: torch.Tensor,
@@ -42,6 +87,7 @@ def compute_tablature_accuracy(
 ) -> TabAccuracyMetrics:
     """
     Compute accuracy metrics for tablature transcription.
+    Supports both v1 (NOTE_ON, NOTE_OFF, TAB...) and v2 (TAB, TIME_SHIFT...) formats.
 
     Args:
         predictions: [B, L] - Predicted token IDs
@@ -73,50 +119,105 @@ def compute_tablature_accuracy(
     target_tokens = [output_vocab.id_to_token[idx.item()] for idx in target_flat]
 
     # playability score
-    tab_positions = extract_tab_positions(pred_tokens)
-    difficulty = difficulty_score(tab_positions)
+    tab_positions_for_difficulty = extract_tab_positions(pred_tokens)
+    difficulty = difficulty_score(tab_positions_for_difficulty)
 
-    # Note-level accuracy (only NOTE_ON positions)
-    note_positions = [
-        i for i, token in enumerate(target_tokens) if token.startswith("NOTE_ON_")
-    ]
+    # Detect format based on target tokens
+    has_note_on = any(t.startswith("NOTE_ON_") for t in target_tokens)
+    
+    if has_note_on:
+        # --- v1 Logic (NOTE_ON based) ---
+        note_positions = [
+            i for i, token in enumerate(target_tokens) if token.startswith("NOTE_ON_")
+        ]
 
-    if len(note_positions) == 0:
-        return TabAccuracyMetrics(
-            token_accuracy=token_accuracy,
-            pitch_accuracy=0.0,
-            tab_accuracy=0.0,
-            difficulty=0.0,
-            total_tokens=total_tokens,
-            total_notes=0,
-        )
+        if len(note_positions) == 0:
+            return TabAccuracyMetrics(
+                token_accuracy=token_accuracy,
+                pitch_accuracy=0.0,
+                tab_accuracy=0.0,
+                difficulty=difficulty,
+                total_tokens=total_tokens,
+                total_notes=0,
+                levenshtein_distance=0.0,
+                levenshtein_similarity=0.0
+            )
 
-    # Pitch accuracy: check if pitch matches
-    pitch_correct = 0
-    for pos in note_positions:
-        pred_token = pred_tokens[pos]
-        target_token = target_tokens[pos]
-        if pred_token == target_token:
-            pitch_correct += 1
+        # Pitch accuracy: check if pitch matches
+        pitch_correct = 0
+        for pos in note_positions:
+            pred_token = pred_tokens[pos]
+            target_token = target_tokens[pos]
+            if pred_token == target_token:
+                pitch_correct += 1
 
-    pitch_accuracy = pitch_correct / len(note_positions)
+        pitch_accuracy = pitch_correct / len(note_positions)
 
-    # Tab accuracy: check if following TAB token matches
-    # NOTE_ON is always followed by TAB in output sequence
-    tab_correct = 0
-    tab_positions = []
+        # Tab accuracy: check if following TAB token matches
+        # NOTE_ON is always followed by TAB in output sequence
+        tab_correct = 0
+        tab_eval_positions = []
 
-    for pos in note_positions:
-        # Check if next token is TAB
-        if pos + 1 < len(target_tokens):
-            target_next = target_tokens[pos + 1]
-            if target_next.startswith("TAB_"):
-                tab_positions.append(pos + 1)
-                pred_tab = pred_tokens[pos + 1]
-                if pred_tab == target_next:
-                    tab_correct += 1
+        for pos in note_positions:
+            # Check if next token is TAB
+            if pos + 1 < len(target_tokens):
+                target_next = target_tokens[pos + 1]
+                if target_next.startswith("TAB_"):
+                    tab_eval_positions.append(pos + 1)
+                    pred_tab = pred_tokens[pos + 1]
+                    if pred_tab == target_next:
+                        tab_correct += 1
 
-    tab_accuracy = tab_correct / len(tab_positions) if tab_positions else 0.0
+        tab_accuracy = tab_correct / len(tab_eval_positions) if tab_eval_positions else 0.0
+        total_notes = len(note_positions)
+
+    else:
+        # --- v2 Logic (TAB based) ---
+        # No NOTE_ON tokens, so we evaluate based on TAB tokens
+        tab_indices = [
+            i for i, token in enumerate(target_tokens) if token.startswith("TAB_")
+        ]
+
+        if len(tab_indices) == 0:
+            # Maybe it's an empty sequence or only silences?
+            return TabAccuracyMetrics(
+                token_accuracy=token_accuracy,
+                pitch_accuracy=0.0,
+                tab_accuracy=0.0,
+                difficulty=difficulty,
+                total_tokens=total_tokens,
+                total_notes=0,
+                levenshtein_distance=0.0,
+                levenshtein_similarity=0.0
+            )
+        
+        # Tab Accuracy: Exact token match at TAB positions
+        tab_correct = 0
+        for pos in tab_indices:
+            if pred_tokens[pos] == target_tokens[pos]:
+                tab_correct += 1
+        
+        tab_accuracy = tab_correct / len(tab_indices)
+
+        # Pitch Accuracy: Computed pitch match at TAB positions
+        pitch_correct = 0
+        for pos in tab_indices:
+            target_token = target_tokens[pos]
+            pred_token = pred_tokens[pos]
+            
+            target_pitch = compute_pitch_from_tab_token(target_token)
+            
+            # For prediction, we need to check if it's a TAB token first
+            pred_pitch = compute_pitch_from_tab_token(pred_token)
+            
+            if target_pitch != -1 and pred_pitch != -1:
+                if target_pitch == pred_pitch:
+                    pitch_correct += 1
+            # If pred is not a TAB or invalid TAB, it's a mismatch (unless target is also invalid which shouldn't happen)
+            
+        pitch_accuracy = pitch_correct / len(tab_indices)
+        total_notes = len(tab_indices)
+
 
     return TabAccuracyMetrics(
         token_accuracy=token_accuracy,
@@ -124,7 +225,7 @@ def compute_tablature_accuracy(
         tab_accuracy=tab_accuracy,
         difficulty=difficulty,
         total_tokens=total_tokens,
-        total_notes=len(note_positions),
+        total_notes=total_notes,
     )
 
 def generate_and_compute_accuracy(
@@ -275,8 +376,11 @@ def extract_tab_positions(tokens):
     for t in tokens:
         if t.startswith("TAB_"):
             # format: TAB_<string>_<fret>
-            _, s, f = t.split("_")
-            positions.append((int(s), int(f)))
+            try:
+                _, s, f = t.split("_")
+                positions.append((int(s), int(f)))
+            except ValueError:
+                pass
     return positions
 
 def difficulty_score(positions, alpha=0.25):
@@ -313,4 +417,3 @@ def difficulty_score(positions, alpha=0.25):
         diffs.append(difficulty)
 
     return sum(diffs) / len(diffs)
-
