@@ -35,7 +35,7 @@ class TabAccuracyMetrics:
             f"Token Acc: {self.token_accuracy:.2%} | "
             f"Pitch Acc: {self.pitch_accuracy:.2%} | "
             f"Tab Acc: {self.tab_accuracy:.2%} | "
-            f"Lev Sim: {self.levenshtein_similarity:.2%} | "
+            # f"Lev Sim: {self.levenshtein_similarity:.2%} | "
             f"({self.total_notes} notes, {self.total_tokens} tokens)"
         )
 
@@ -139,8 +139,8 @@ def compute_tablature_accuracy(
                 difficulty=difficulty,
                 total_tokens=total_tokens,
                 total_notes=0,
-                levenshtein_distance=0.0,
-                levenshtein_similarity=0.0
+                # levenshtein_distance=0.0,
+                # levenshtein_similarity=0.0
             )
 
         # Pitch accuracy: check if pitch matches
@@ -187,8 +187,8 @@ def compute_tablature_accuracy(
                 difficulty=difficulty,
                 total_tokens=total_tokens,
                 total_notes=0,
-                levenshtein_distance=0.0,
-                levenshtein_similarity=0.0
+                # levenshtein_distance=0.0,
+                # levenshtein_similarity=0.0
             )
         
         # Tab Accuracy: Exact token match at TAB positions
