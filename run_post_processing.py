@@ -33,9 +33,9 @@ def load_post_processing_module(method: str):
         post_process_pitch_alignment function from the selected module
     """
     if method == 'fret':
-        module_path = Path(__file__).parent / "src" / "post_processing-fret.py"
+        module_path = Path(__file__).parent / "src" / "post_processing_fret.py"
     elif method == 'reverse':
-        module_path = Path(__file__).parent / "src" / "post_processing-reverse.py"
+        module_path = Path(__file__).parent / "src" / "post_processing_reverse.py"
     else:
         raise ValueError(f"Unknown method: {method}. Must be 'fret' or 'reverse'")
 
