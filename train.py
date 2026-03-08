@@ -223,6 +223,11 @@ def train_epoch(
         #   decoder_attention_mask: [B, L_dec-1] - Mask for decoder input
         decoder_input_ids = labels[:, :-1].contiguous()
         labels = labels[:, 1:].contiguous()
+        
+        # Mask pad tokens in labels
+        labels = labels.clone()
+        labels[labels == 0] = -100 # PAD id is 0
+        
         decoder_attention_mask = decoder_attention_mask[:, 1:].contiguous()
 
         # Forward pass
@@ -273,14 +278,18 @@ def evaluate(model: FrettingTransformer, val_loader: DataLoader, device: str):
             # Shapes: [B, L_enc], [B, L_enc], [B, L_dec], [B, L_dec]
             input_ids = batch["input_ids"].to(device)
             attention_mask = batch["attention_mask"].to(device)
-            labels = batch["output_ids"].to(device)
+            output_ids = batch["output_ids"].to(device)
             decoder_attention_mask = batch["decoder_attention_mask"].to(device)
 
             # Shift labels right
             # Shapes after: [B, L_dec-1], [B, L_dec-1], [B, L_dec-1]
-            decoder_input_ids = labels[:, :-1].contiguous()
-            labels = labels[:, 1:].contiguous()
+            decoder_input_ids = output_ids[:, :-1].contiguous()
+            labels = output_ids[:, 1:].contiguous()
             decoder_attention_mask = decoder_attention_mask[:, 1:].contiguous()
+            
+             # Mask pad tokens in labels
+            labels = labels.clone()
+            labels[labels == 0] = -100 # PAD id is 0
 
             # Forward pass
             outputs: Seq2SeqLMOutput = model(
@@ -396,6 +405,7 @@ def main(cfg: DictConfig):
                     token_accuracy=ar_metrics.token_accuracy,
                     pitch_accuracy=ar_metrics.pitch_accuracy,
                     tab_accuracy=ar_metrics.tab_accuracy,
+                    difficulty=ar_metrics.difficulty,
                     total_tokens=ar_metrics.total_tokens,
                     total_notes=ar_metrics.total_notes
                 )
@@ -454,12 +464,14 @@ def main(cfg: DictConfig):
             device=device,
             max_length=cfg.training.get('ar_eval_max_length', 1024),
             num_beams=cfg.training.get('ar_eval_num_beams', 1),
-            max_batches=None  # Use all batches for final evaluation
+            # max_batches=None  # Use all batches for final evaluation
+            max_batches=cfg.training.get('ar_eval_max_batches', None)
         )
         print(f"\nTest Set AR Metrics:")
         print(f"  Token Accuracy:  {test_ar_metrics.token_accuracy:.2%}")
         print(f"  Pitch Accuracy:  {test_ar_metrics.pitch_accuracy:.2%}")
         print(f"  Tab Accuracy:    {test_ar_metrics.tab_accuracy:.2%}")
+        print(f"  Difficulty:        {test_ar_metrics.difficulty:.2f}")
 
         # Save final test generated samples
         samples_file = output_dir / "test_generated_samples.json"
@@ -477,7 +489,8 @@ def main(cfg: DictConfig):
             pitch_accuracy=test_ar_metrics.pitch_accuracy,
             tab_accuracy=test_ar_metrics.tab_accuracy,
             total_tokens=test_ar_metrics.total_tokens,
-            total_notes=test_ar_metrics.total_notes
+            total_notes=test_ar_metrics.total_notes,
+            difficulty=test_ar_metrics.difficulty
         )
 
     print("\n" + "=" * 80)

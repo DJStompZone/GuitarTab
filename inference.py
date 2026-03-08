@@ -10,11 +10,12 @@ import hydra
 from omegaconf import DictConfig
 from torch.utils.data import DataLoader
 from functools import partial
+from pathlib import Path
 
 from src.model import FrettingTransformer
 from src.metrics import generate_and_compute_accuracy
 from src.dataloader import create_dataset, create_dataloader
-
+from src.visualization import *
 
 def load_checkpoint(checkpoint_path: str, model, device: str):
     """Load model from checkpoint."""
@@ -27,6 +28,68 @@ def load_checkpoint(checkpoint_path: str, model, device: str):
     print(f"  Val loss: {checkpoint['val_loss']:.4f}")
 
     return model
+
+class FTEvent:
+    def __init__(self, type, **kwargs):
+        self.type = type
+        for k, v in kwargs.items():
+            setattr(self, k, v)
+
+def decode_tokens_to_events(tokens):
+    """
+    Convert Fretting-Transformer tokens into event objects compatible with render_as_tablature().
+    """
+    events = []
+    for t in tokens:
+        if t.startswith("NOTE_ON_"):
+            pitch = int(t.split("_")[2])
+            events.append(FTEvent("NOTE_ON", pitch=pitch))
+        elif t.startswith("NOTE_OFF_"):
+            pitch = int(t.split("_")[2])
+            events.append(FTEvent("NOTE_OFF", pitch=pitch))
+        elif t.startswith("TIME_SHIFT_"):
+            delta = int(t.split("_")[2])
+            events.append(FTEvent("TIME_SHIFT", delta=delta))
+        elif t.startswith("TAB_"):
+            _, s, f = t.split("_")
+            events.append(FTEvent("TAB", string=int(s), fret=int(f)))
+        else:
+            pass  # ignore
+    return events
+
+
+def visualize_tab_sample(gt_ids, pred_ids, output_vocab, max_bars=2):
+    """
+    Render predicted vs ground truth tablature for inspection.
+
+    Args:
+        gt_ids: Tensor of token IDs (ground truth)
+        pred_ids: Tensor of token IDs (model prediction)
+        output_vocab: Vocabulary object (must support id_to_token)
+        max_bars: Number of bars to render in tablature
+    """
+
+    # Convert token IDs to token strings
+    gt_tokens = [output_vocab.id_to_token[t.item()] for t in gt_ids]
+    pred_tokens = [output_vocab.id_to_token[t.item()] for t in pred_ids]
+
+    # Convert to events
+    gt_events = decode_tokens_to_events(gt_tokens)
+    pred_events = decode_tokens_to_events(pred_tokens)
+
+    # Visualization using the official tab renderer
+    gt_tab = render_as_tablature(gt_events, max_bars=4, chars_per_beat=8, bars_per_row=4)
+    pred_tab = render_as_tablature(pred_events, max_bars=4, chars_per_beat=8, bars_per_row=4)
+
+    print("\n" + "=" * 80)
+    print("GROUND TRUTH TAB")
+    print("=" * 80)
+    print(gt_tab)
+
+    print("\n" + "=" * 80)
+    print("PREDICTED TAB")
+    print("=" * 80)
+    print(pred_tab)
 
 
 @hydra.main(version_base=None, config_path="configs", config_name="inference")
@@ -43,7 +106,7 @@ def main(cfg: DictConfig):
     # Use test split by default for inference
     if cfg.data.selected_files_json is None:
         print("No selected_files_json specified, using test split by default...")
-        cfg.data.selected_files_json = "data_splits/mini_test_files.json"
+        cfg.data.selected_files_json = "data_splits/test_files.json"
 
     # Create dataset
     print(f"Loading dataset from {cfg.data.selected_files_json}")
@@ -56,6 +119,7 @@ def main(cfg: DictConfig):
         max_time_shift=cfg.data.max_time_shift,
         num_strings=cfg.data.num_strings,
         num_frets=cfg.data.num_frets,
+        output_format=cfg.data.get('output_format', 'v1'),
         max_files=cfg.data.get('max_files', None)
     )
 
@@ -71,6 +135,14 @@ def main(cfg: DictConfig):
     print(f"Dataset: {len(dataset)} segments\n")
 
     input_vocab_size, output_vocab_size = dataset.get_vocab_sizes()
+    
+    # debug
+    # print(f"input_vocab_size = {input_vocab_size}")
+    # print(f"output_vocab_size = {output_vocab_size}")
+
+    # print("cfg.data:")
+    # print(cfg.data)
+    # breakpoint()
 
     # Create model
     print("Initializing model...")
@@ -100,105 +172,53 @@ def main(cfg: DictConfig):
         device=device,
         max_length=cfg.training.get('ar_eval_max_length', 1024),
         num_beams=cfg.training.get('ar_eval_num_beams', 1),
-        max_batches=cfg.get('max_eval_batches', None),  # None = all batches
-        use_teacher_forcing=cfg.training.get('ar_eval_use_teacher_forcing', True),  # NEW
-        temperature=cfg.training.get('ar_eval_temperature', 1.0)
+        max_batches=cfg.get('max_eval_batches', None)  # None = all batches
     )
 
     # Save predictions and targets
-    os.makedirs(cfg.output_dir, exist_ok=True)
-    input_ids_file = os.path.join(cfg.output_dir, "input_ids.pt")
-    targets_file = os.path.join(cfg.output_dir, "targets.pt")
-    predictions_file = os.path.join(cfg.output_dir, "predictions.pt")
+    # covert to Path
+    cfg.output_dir = Path(cfg.output_dir)
+
+    # Make sure folder exists
+    cfg.output_dir.mkdir(parents=True, exist_ok=True)
+
+    input_ids_file = cfg.output_dir / "input_ids.pt"
+    targets_file = cfg.output_dir / "targets.pt"
+    predictions_file = cfg.output_dir / "predictions.pt"
     torch.save(input_ids, input_ids_file)
     torch.save(targets, targets_file)
     torch.save(predictions, predictions_file)
 
 
-    print(f"\nResults (Before Post-Processing):")
+    print(f"\nResults:")
     print(f"  Token Accuracy:  {metrics.token_accuracy:.2%}")
     print(f"  Pitch Accuracy:  {metrics.pitch_accuracy:.2%}")
     print(f"  Tab Accuracy:    {metrics.tab_accuracy:.2%}")
+    print(f"  Difficulty:      {metrics.difficulty:.5}")
     print(f"  Total Tokens:    {metrics.total_tokens:,}")
     print(f"  Total Notes:     {metrics.total_notes:,}")
 
-    # ========================================================================
-    # Post-Processing
-    # ========================================================================
-    from tqdm import tqdm
-    from src.post_processing import post_process_pitch_alignment
-    from src.metrics import compute_tablature_accuracy
+
+    # ======================================================================
+    # VISUALIZATION
+    # Show ground truth vs predicted tablature for a few samples
+    # ======================================================================
 
     print("\n" + "=" * 80)
-    print("Applying pitch alignment post-processing...")
+    print("Visualizing Predicted vs Ground Truth Tablature")
     print("=" * 80)
 
-    # Get the vocabularies from the dataset object
-    input_vocab = dataset.input_vocab
-    output_vocab = dataset.output_vocab
-    
-    aligned_predictions = []
-    
-    # Convert tensors to lists for easier iteration
-    input_ids_list = input_ids.cpu().tolist()
-    predictions_list = predictions.cpu().tolist()
-    
-    for i in tqdm(range(len(predictions_list)), desc="Post-processing segments"):
-        single_input_ids = input_ids_list[i]
-        single_pred_ids = predictions_list[i]
-        
-        # Un-pad sequences before sending to alignment for efficiency
-        try:
-            input_end_idx = single_input_ids.index(input_vocab.pad_id)
-            input_tokens = single_input_ids[:input_end_idx]
-        except ValueError:
-            input_tokens = single_input_ids
+    num_samples_to_show = min(3, len(predictions))  # Change if needed
 
-        try:
-            pred_end_idx = single_pred_ids.index(output_vocab.pad_id)
-            pred_tokens = single_pred_ids[:pred_end_idx]
-        except ValueError:
-            pred_tokens = single_pred_ids
-
-        # Apply alignment
-        aligned_ids = post_process_pitch_alignment(
-            input_ids=input_tokens,
-            pred_ids=pred_tokens,
-            input_vocab=input_vocab,
-            output_vocab=output_vocab
+    for idx in range(num_samples_to_show):
+        print(f"\n--- SAMPLE {idx} ---")
+        visualize_tab_sample(
+            gt_ids=targets[idx],
+            pred_ids=predictions[idx],
+            output_vocab=dataset.output_vocab,
+            max_bars=2
         )
-        aligned_predictions.append(aligned_ids)
 
-    # Re-pad the aligned predictions to match the target tensor shape for metric calculation
-    max_len = targets.shape[1]
-    padded_aligned_predictions = torch.full_like(targets, output_vocab.pad_id)
-    for i, seq in enumerate(aligned_predictions):
-        seq_len = min(len(seq), max_len)
-        padded_aligned_predictions[i, :seq_len] = torch.tensor(seq[:seq_len], dtype=torch.long)
-
-    # Move to the correct device
-    padded_aligned_predictions = padded_aligned_predictions.to(device)
-
-    # Save the aligned predictions
-    aligned_predictions_file = os.path.join(cfg.output_dir, "predictions_aligned.pt")
-    torch.save(padded_aligned_predictions, aligned_predictions_file)
-    print(f"\nSaved aligned predictions to {aligned_predictions_file}")
-
-    # Compute metrics for the aligned predictions
-    print("\nComputing metrics for aligned predictions...")
-    metrics_aligned = compute_tablature_accuracy(
-        predictions=padded_aligned_predictions,
-        targets=targets,
-        output_vocab=output_vocab,
-        pad_id=output_vocab.pad_id
-    )
-
-    print(f"\nResults (After Post-Processing):")
-    print(f"  Token Accuracy:  {metrics_aligned.token_accuracy:.2%}")
-    print(f"  Pitch Accuracy:  {metrics_aligned.pitch_accuracy:.2%}")
-    print(f"  Tab Accuracy:    {metrics_aligned.tab_accuracy:.2%}")
-    print(f"  Total Tokens:    {metrics_aligned.total_tokens:,}")
-    print(f"  Total Notes:     {metrics_aligned.total_notes:,}")
 
     print("\n" + "=" * 80)
     print("Inference complete!")

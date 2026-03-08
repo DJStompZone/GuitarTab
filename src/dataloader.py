@@ -23,6 +23,7 @@ def create_dataset(
     max_time_shift: int = 500,
     num_strings: int = 6,
     num_frets: int = 21,
+    output_format: str = "v1",
     max_files: Optional[int] = None
 ) -> TabDataset:
     """
@@ -37,6 +38,9 @@ def create_dataset(
         max_time_shift: Maximum time shift in ticks
         num_strings: Number of guitar strings
         num_frets: Number of frets
+        output_format: "v1" or "v2"
+            - v1: output = NOTE_ON, TAB, NOTE_OFF, TIME_SHIFT
+            - v2: output = TAB, TIME_SHIFT (no NOTE_ON/OFF)
         max_files: Limit number of files (for debugging)
 
     Returns:
@@ -77,7 +81,8 @@ def create_dataset(
         max_pitch=max_pitch,
         max_time_shift=max_time_shift,
         num_strings=num_strings,
-        num_frets=num_frets
+        num_frets=num_frets,
+        output_format=output_format
     )
 
     return dataset

@@ -55,6 +55,7 @@ class TrainingLogger:
         token_accuracy: float,
         pitch_accuracy: float,
         tab_accuracy: float,
+        difficulty: float,
         total_tokens: int,
         total_notes: int,
         generated_samples: Optional[List[Dict[str, Any]]] = None
@@ -67,6 +68,7 @@ class TrainingLogger:
             token_accuracy: Token-level accuracy
             pitch_accuracy: Pitch accuracy
             tab_accuracy: Tab accuracy
+            Difficulty: Tab difficulty score 
             total_tokens: Total number of tokens
             total_notes: Total number of notes
             generated_samples: List of generated token sequences
@@ -77,6 +79,7 @@ class TrainingLogger:
                 'token_accuracy': float(token_accuracy),
                 'pitch_accuracy': float(pitch_accuracy),
                 'tab_accuracy': float(tab_accuracy),
+                'difficulty': float(difficulty),
                 'total_tokens': int(total_tokens),
                 'total_notes': int(total_notes)
             }
@@ -104,6 +107,7 @@ class TrainingLogger:
         token_accuracy: float,
         pitch_accuracy: float,
         tab_accuracy: float,
+        difficulty: float,
         total_tokens: int,
         total_notes: int
     ):
@@ -114,6 +118,7 @@ class TrainingLogger:
             token_accuracy: Token-level accuracy
             pitch_accuracy: Pitch accuracy
             tab_accuracy: Tab accuracy
+            Difficulty: Tab difficulty score
             total_tokens: Total number of tokens
             total_notes: Total number of notes
         """
@@ -124,6 +129,7 @@ class TrainingLogger:
             'token_accuracy': float(token_accuracy),
             'pitch_accuracy': float(pitch_accuracy),
             'tab_accuracy': float(tab_accuracy),
+            'difficulty': float(difficulty),
             'total_tokens': int(total_tokens),
             'total_notes': int(total_notes)
         }
