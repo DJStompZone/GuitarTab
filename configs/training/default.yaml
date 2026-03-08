@@ -16,7 +16,7 @@ scheduler:
   num_training_steps: 50000  # Will be computed based on dataset size
 
 # Training settings
-num_epochs: 10
+num_epochs: 500
 max_steps: null  # null = use num_epochs
 gradient_accumulation_steps: 1
 max_grad_norm: 1.0
@@ -33,7 +33,7 @@ fp16: false
 bf16: false
 
 # Evaluation
-eval_batch_size: 128
+eval_batch_size: 64
 
 # Autoregressive (AR) evaluation - computes real accuracy via generation
 ar_eval_enabled: true           # Whether to do AR eval

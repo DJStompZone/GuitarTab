@@ -1,6 +1,5 @@
 defaults:
   - config
-  - postprocessing: default
   - _self_
 
 # Experiment settings
