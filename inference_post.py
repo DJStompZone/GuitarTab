@@ -82,7 +82,7 @@ def main(cfg: DictConfig):
     ).to(device)
 
     # Load checkpoint
-    checkpoint_path = cfg.get('checkpoint_path', 'outputs/fretting_transformer/best_model.pt')
+    checkpoint_path = cfg.get('checkpoint_path', 'outputs/fretting_transformer/checkpoint_epoch_200.pt')
     if not os.path.exists(checkpoint_path):
         raise FileNotFoundError(f"Checkpoint not found: {checkpoint_path}")
 
@@ -144,34 +144,46 @@ def main(cfg: DictConfig):
     # Convert tensors to lists for easier iteration
     input_ids_list = input_ids.cpu().tolist()
     predictions_list = predictions.cpu().tolist()
+    targets_list = targets.cpu().tolist()
     
     for i in tqdm(range(len(predictions_list)), desc="Post-processing segments"):
+    # for i in [0]:
+        # compute tabular metric for each sequence
+        m = compute_tablature_accuracy(
+            predictions=torch.tensor([predictions_list[i]], dtype=torch.long),
+            targets=torch.tensor([targets_list[i]], dtype=torch.long),
+            output_vocab=output_vocab,
+            pad_id=output_vocab.pad_id
+        )
+        print(f"\nSegment {i}:")
+        print(f"  Before Post-Processing - Token Acc: {m.token_accuracy:.2%}, Pitch Acc: {m.pitch_accuracy:.2%}, Tab Acc: {m.tab_accuracy:.2%}")
+
         single_input_ids = input_ids_list[i]
         single_pred_ids = predictions_list[i]
-        
-        # Un-pad sequences before sending to alignment for efficiency
-        try:
-            input_end_idx = single_input_ids.index(input_vocab.pad_id)
-            input_tokens = single_input_ids[:input_end_idx]
-        except ValueError:
-            input_tokens = single_input_ids
+        single_target_ids = targets_list[i]
+        print(f"input len: {len(single_input_ids)}, pred len: {len(single_pred_ids)}, target len: {len(single_target_ids)}")
 
-        try:
-            pred_end_idx = single_pred_ids.index(output_vocab.pad_id)
-            pred_tokens = single_pred_ids[:pred_end_idx]
-        except ValueError:
-            pred_tokens = single_pred_ids
-
-        # Apply alignment
+        # Apply alignment with full sequences (padding will be handled inside post_process_pitch_alignment)
         aligned_ids = post_process_pitch_alignment(
-            input_ids=input_tokens,
-            pred_ids=pred_tokens,
+            input_ids=single_input_ids,
+            pred_ids=single_target_ids,
             input_vocab=input_vocab,
-            output_vocab=output_vocab
+            output_vocab=output_vocab,
+            target_ids=single_target_ids
         )
         aligned_predictions.append(aligned_ids)
+        # Compute metrics after post-processing
+        m_aligned = compute_tablature_accuracy(
+            predictions=torch.tensor([aligned_ids], dtype=torch.long),
+            targets=torch.tensor([targets_list[i]], dtype=torch.long),
+            output_vocab=output_vocab,
+            pad_id=output_vocab.pad_id
+        )
+        print(f"  After Post-Processing  - Token Acc: {m_aligned.token_accuracy:.2%}, Pitch Acc: {m_aligned.pitch_accuracy:.2%}, Tab Acc: {m_aligned.tab_accuracy:.2%}")
 
-    # Re-pad the aligned predictions to match the target tensor shape for metric calculation
+    # Stack aligned predictions into tensor (they are already padded to correct length)
+    # Note: post_process_pitch_alignment already pads each sequence to original length
+    # Here we just need to ensure all sequences match the batch's max_len
     max_len = targets.shape[1]
     padded_aligned_predictions = torch.full_like(targets, output_vocab.pad_id)
     for i, seq in enumerate(aligned_predictions):

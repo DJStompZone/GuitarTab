@@ -5,6 +5,7 @@
 #SBATCH --gres=gpu:1
 #SBATCH --account=ACD114010
 #SBATCH --partition=normal
+#SBATCH --output=slurm-%j-ar.out
 
 echo "Running on node: $(hostname)"
 

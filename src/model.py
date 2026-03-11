@@ -171,6 +171,7 @@ class FrettingTransformer(nn.Module):
         pad_token_id: int = 0,
         temperature: float = 1.0,
         verbose: bool = False,
+        logits_processor=None,
         **kwargs  # Ignore unused HF params (num_beams, etc.)
     ):
         """
@@ -186,6 +187,8 @@ class FrettingTransformer(nn.Module):
             pad_token_id: Padding token ID
             temperature: Sampling temperature (1.0 = greedy)
             verbose: Print generation progress
+            logits_processor: Optional BatchTablatureLogitsProcessor for constrained decoding.
+                             When provided, applies grammar constraints to filter invalid tokens.
 
         Returns:
             [B, L_gen] - Generated sequences (includes start token)
@@ -195,6 +198,7 @@ class FrettingTransformer(nn.Module):
             - Supports per-sample teacher forcing via start_token_id
             - Uses greedy decoding (beam search not yet implemented)
             - Properly handles EOS tokens and pads finished sequences
+            - When logits_processor is provided, enforces tablature grammar constraints
         """
         device = input_ids.device
         batch_size = input_ids.shape[0]
@@ -234,8 +238,16 @@ class FrettingTransformer(nn.Module):
                 if temperature != 1.0:
                     logits = logits / temperature
 
+                # Apply constrained decoding if processor is provided
+                if logits_processor is not None:
+                    logits = logits_processor(decoder_input_ids, logits)
+
                 # Greedy decoding
                 next_token = torch.argmax(logits, dim=-1)  # [B]
+
+                # Update logits processor state after token selection
+                if logits_processor is not None:
+                    logits_processor.update_state(next_token)
 
                 # Mark finished sequences
                 finished = finished | (next_token == eos_token_id)

@@ -16,7 +16,7 @@ scheduler:
   num_training_steps: 50000  # Will be computed based on dataset size
 
 # Training settings
-num_epochs: 10
+num_epochs: 1000
 max_steps: null  # null = use num_epochs
 gradient_accumulation_steps: 1
 max_grad_norm: 1.0
@@ -43,3 +43,6 @@ ar_eval_max_length: 1024        # Max generation length
 ar_eval_num_beams: 1            # DEPRECATED: Beam search beams (1 = greedy, kept for compat)
 ar_eval_use_teacher_forcing: true  # NEW: Start generation with first target token
 ar_eval_temperature: 1.0        # NEW: Temperature for sampling (1.0 = greedy)
+
+# Constrained decoding - enforce valid token grammar at generation time
+use_constrained_decoding: false  # When true, enforces tablature grammar constraints during generation

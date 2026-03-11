@@ -19,6 +19,9 @@ class TabAccuracyMetrics:
     pitch_accuracy: float  # % of NOTE_ON with correct pitch
     tab_accuracy: float  # % of NOTE_ON with correct (string, fret)
 
+    # playability score (difficulty)
+    difficulty: float
+
     # Counts
     total_tokens: int
     total_notes: int
@@ -31,50 +34,11 @@ class TabAccuracyMetrics:
             f"({self.total_notes} notes, {self.total_tokens} tokens)"
         )
 
-
-@dataclass
-class PostProcessingMetrics:
-    """Container for post-processing comparison metrics."""
-
-    # Raw model metrics
-    raw_token_accuracy: float
-    raw_pitch_accuracy: float
-    raw_tab_accuracy: float
-
-    # Post-processed metrics
-    post_token_accuracy: float
-    post_pitch_accuracy: float
-    post_tab_accuracy: float
-
-    # Improvements
-    token_improvement: float
-    pitch_improvement: float
-    tab_improvement: float
-
-    # Counts
-    total_tokens: int
-    total_notes: int
-
-    # Method used
-    method: str
-
-    def __str__(self) -> str:
-        return (
-            f"Method: {self.method}\n"
-            f"Raw:  Token {self.raw_token_accuracy:.2%} | "
-            f"Pitch {self.raw_pitch_accuracy:.2%} | "
-            f"Tab {self.raw_tab_accuracy:.2%}\n"
-            f"Post: Token {self.post_token_accuracy:.2%} | "
-            f"Pitch {self.post_pitch_accuracy:.2%} | "
-            f"Tab {self.post_tab_accuracy:.2%}\n"
-            f"Improvement: Token {self.token_improvement:+.2%} | "
-            f"Pitch {self.pitch_improvement:+.2%} | "
-            f"Tab {self.tab_improvement:+.2%}"
-        )
-
-
 def compute_tablature_accuracy(
-    predictions: torch.Tensor, targets: torch.Tensor, output_vocab, pad_id: int = 0
+    predictions: torch.Tensor,
+    targets: torch.Tensor,
+    output_vocab,
+    # pad_id: int = -100 # 0
 ) -> TabAccuracyMetrics:
     """
     Compute accuracy metrics for tablature transcription.
@@ -88,17 +52,17 @@ def compute_tablature_accuracy(
     Returns:
         TabAccuracyMetrics with computed accuracies
     """
-    # Flatten tensors (use reshape to handle non-contiguous tensors)
-    pred_flat = predictions.reshape(-1)
-    target_flat = targets.reshape(-1)
+    # Flatten tensors
+    pred_flat = predictions.view(-1)
+    target_flat = targets.view(-1)
 
     # Mask out padding
-    non_pad_mask = target_flat != pad_id
+    # print("pad_id", output_vocab.pad_id)
+    non_pad_mask = target_flat != output_vocab.pad_id
     pred_flat = pred_flat[non_pad_mask]
     target_flat = target_flat[non_pad_mask]
 
     total_tokens = len(target_flat)
-    print("Total non-pad tokens:", total_tokens)
 
     # Token-level accuracy (all tokens)
     correct_tokens = (pred_flat == target_flat).sum().item()
@@ -108,24 +72,9 @@ def compute_tablature_accuracy(
     pred_tokens = [output_vocab.id_to_token[idx.item()] for idx in pred_flat]
     target_tokens = [output_vocab.id_to_token[idx.item()] for idx in target_flat]
 
-    # for t in pred_tokens[:10]:
-    #     print("Pred Token:", t)
-    # for t in target_tokens[:10]:
-    #     print("Target Token:", t)
-
-    num_incorrect_noteons = 0
-    num_incorrect_tabs = 0
-    num_incorrect_time = 0
-    # for t1, t2 in zip(pred_tokens, target_tokens):
-    #     if t2.startswith("NOTE_ON_") and t1 != t2:
-    #         num_incorrect_noteons += 1
-    #     if t2.startswith("TAB_") and t1 != t2:
-    #         num_incorrect_tabs += 1
-    #     if t2.startswith("TIME_") and t1 != t2:
-    #         num_incorrect_time += 1
-    # print("Incorrect NOTE_ONs:", num_incorrect_noteons)
-    # print("Incorrect TABs:", num_incorrect_tabs)
-    # print("Incorrect TIMEs:", num_incorrect_time)
+    # playability score
+    tab_positions = extract_tab_positions(pred_tokens)
+    difficulty = difficulty_score(tab_positions)
 
     # Note-level accuracy (only NOTE_ON positions)
     note_positions = [
@@ -139,6 +88,7 @@ def compute_tablature_accuracy(
             tab_accuracy=0.0,
             total_tokens=total_tokens,
             total_notes=0,
+        difficulty=0.0,
         )
 
     # Pitch accuracy: check if pitch matches
@@ -172,10 +122,10 @@ def compute_tablature_accuracy(
         token_accuracy=token_accuracy,
         pitch_accuracy=pitch_accuracy,
         tab_accuracy=tab_accuracy,
+        difficulty=difficulty,
         total_tokens=total_tokens,
         total_notes=len(note_positions),
     )
-
 
 def generate_and_compute_accuracy(
     model,
@@ -185,10 +135,8 @@ def generate_and_compute_accuracy(
     max_length: int = 1024,
     num_beams: int = 1,  # DEPRECATED (kept for config compat)
     max_batches: Optional[int] = None,
-    use_teacher_forcing: bool = True,
-    temperature: float = 1.0,
-    use_constrained_decoding: bool = False,
-    input_vocab=None,
+    use_teacher_forcing: bool = True,  # NEW
+    temperature: float = 1.0,  # NEW
 ) -> tuple[TabAccuracyMetrics, tuple[torch.Tensor, torch.Tensor, torch.Tensor]]:
     """
     Generate sequences autoregressively and compute accuracy.
@@ -201,23 +149,11 @@ def generate_and_compute_accuracy(
         max_length: Maximum generation length
         num_beams: Number of beams for beam search
         max_batches: Limit number of batches (for speed)
-        use_teacher_forcing: Whether to use teacher forcing for start token
-        temperature: Sampling temperature
-        use_constrained_decoding: Whether to use constrained decoding
-        input_vocab: Input vocabulary (required if use_constrained_decoding=True)
+        return_predictions: If True, return (metrics, (predictions, targets))
 
     Returns:
         (metrics, (input_ids, targets, predictions))
     """
-    # Import constrained decoding utilities if needed
-    if use_constrained_decoding:
-        if input_vocab is None:
-            raise ValueError("input_vocab is required for constrained decoding")
-        from src.constrained_decoding import (
-            extract_pitches_batch,
-            BatchTablatureLogitsProcessor,
-        )
-    
     model.eval()
 
     all_predictions = []
@@ -247,16 +183,6 @@ def generate_and_compute_accuracy(
             else:
                 start_token_id = None  # Will use BOS=1
 
-            # Create constrained decoding processor if enabled
-            logits_processor = None
-            if use_constrained_decoding:
-                input_pitches_batch = extract_pitches_batch(input_ids, input_vocab)
-                logits_processor = BatchTablatureLogitsProcessor(
-                    output_vocab=output_vocab,
-                    input_pitches_batch=input_pitches_batch,
-                    device=device
-                )
-
             # Generate (now uses custom implementation)
             generated = model.generate(
                 input_ids=input_ids,
@@ -266,8 +192,7 @@ def generate_and_compute_accuracy(
                 eos_token_id=output_vocab.eos_id if hasattr(output_vocab, "eos_id") else 2,
                 pad_token_id=output_vocab.pad_id,
                 temperature=temperature,
-                verbose=False,
-                logits_processor=logits_processor,
+                verbose=False
             )
 
             # Pad/trim both generated and targets to max_length for uniform shape
@@ -336,66 +261,55 @@ def generate_and_compute_accuracy(
         predictions=predictions,
         targets=targets,
         output_vocab=output_vocab,
-        pad_id=output_vocab.pad_id,
+        # pad_id=output_vocab.pad_id,
     )
 
     return metrics, (input_ids, targets, predictions)
 
-
-def compute_postprocessing_metrics(
-    raw_predictions: torch.Tensor,
-    postprocessed_predictions: torch.Tensor,
-    targets: torch.Tensor,
-    output_vocab,
-    method: str,
-    pad_id: int = 0
-) -> PostProcessingMetrics:
+def extract_tab_positions(tokens):
     """
-    Compute comparison metrics between raw and post-processed predictions.
-
-    Args:
-        raw_predictions: Original model predictions [B, L]
-        postprocessed_predictions: After post-processing [B, L]
-        targets: Ground truth [B, L]
-        output_vocab: Output vocabulary
-        method: Post-processing method used
-        pad_id: Padding token ID
-
-    Returns:
-        PostProcessingMetrics with all comparisons
+    tokens: list of string tokens like ["NOTE_ON_55", "TAB_3_0", ...]
+    return: list of (string:int, fret:int)
     """
-    # Compute metrics for raw predictions
-    raw_metrics = compute_tablature_accuracy(
-        predictions=raw_predictions,
-        targets=targets,
-        output_vocab=output_vocab,
-        pad_id=pad_id
-    )
+    positions = []
+    for t in tokens:
+        if t.startswith("TAB_"):
+            # format: TAB_<string>_<fret>
+            _, s, f = t.split("_")
+            positions.append((int(s), int(f)))
+    return positions
 
-    # Compute metrics for post-processed predictions
-    post_metrics = compute_tablature_accuracy(
-        predictions=postprocessed_predictions,
-        targets=targets,
-        output_vocab=output_vocab,
-        pad_id=pad_id
-    )
+def difficulty_score(positions, alpha=0.25):
+    """
+    Difficulty score
+    positions: list of (string, fret)
+    return: mean difficulty score
+    """
 
-    # Calculate improvements
-    token_improvement = post_metrics.token_accuracy - raw_metrics.token_accuracy
-    pitch_improvement = post_metrics.pitch_accuracy - raw_metrics.pitch_accuracy
-    tab_improvement = post_metrics.tab_accuracy - raw_metrics.tab_accuracy
+    if len(positions) < 2:
+        return 0.0
 
-    return PostProcessingMetrics(
-        raw_token_accuracy=raw_metrics.token_accuracy,
-        raw_pitch_accuracy=raw_metrics.pitch_accuracy,
-        raw_tab_accuracy=raw_metrics.tab_accuracy,
-        post_token_accuracy=post_metrics.token_accuracy,
-        post_pitch_accuracy=post_metrics.pitch_accuracy,
-        post_tab_accuracy=post_metrics.tab_accuracy,
-        token_improvement=token_improvement,
-        pitch_improvement=pitch_improvement,
-        tab_improvement=tab_improvement,
-        total_tokens=raw_metrics.total_tokens,
-        total_notes=raw_metrics.total_notes,
-        method=method
-    )
+    diffs = []
+
+    for (s1, f1), (s2, f2) in zip(positions[:-1], positions[1:]):
+
+        # fret stretch
+        delta_fret = f2 - f1
+        if delta_fret > 0:
+            fret_stretch = 0.50 * abs(delta_fret)
+        else:
+            fret_stretch = 0.75 * abs(delta_fret)
+
+        # locality 
+        locality = alpha * (f1 + f2)
+
+        along = fret_stretch + locality
+
+        # across
+        delta_string = abs(s2 - s1)
+        across = 0.25 if delta_string <= 1 else 0.50
+
+        difficulty = along + across
+        diffs.append(difficulty)
+
+    return sum(diffs) / len(diffs)

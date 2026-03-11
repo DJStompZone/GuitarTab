@@ -8,6 +8,35 @@ from typing import Optional, Dict, Any, List
 import numpy as np
 
 
+def plot_loss_curve(logger: "TrainingLogger", output_dir: Path) -> None:
+    """
+    Plot train/val loss curve and save to output_dir/loss_curve.png.
+    Called on each checkpoint save and at training end.
+    """
+    history = logger.history
+    epochs = history.get("epochs", [])
+    train_loss = history.get("train_loss", [])
+    val_loss = history.get("val_loss", [])
+    if not epochs:
+        return
+    import matplotlib
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+
+    fig, ax = plt.subplots(figsize=(8, 5))
+    ax.plot(epochs, train_loss, "b-o", label="Train loss", markersize=4)
+    ax.plot(epochs, val_loss, "r-s", label="Val loss", markersize=4)
+    ax.set_xlabel("Epoch")
+    ax.set_ylabel("Loss")
+    ax.set_title("Training and Validation Loss")
+    ax.legend()
+    ax.grid(True, alpha=0.3)
+    out_path = Path(output_dir)
+    out_path.mkdir(parents=True, exist_ok=True)
+    fig.savefig(out_path / "loss_curve.png", dpi=150, bbox_inches="tight")
+    plt.close(fig)
+
+
 class TrainingLogger:
     """Tracks training metrics and saves to JSON."""
 

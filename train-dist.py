@@ -27,7 +27,7 @@ from src.tab_dataset import TabDataset
 from src.model import FrettingTransformer
 from src.metrics import generate_and_compute_accuracy
 from src.dataloader import create_dataset, create_dataloader
-from src.training_logger import TrainingLogger, save_generated_samples
+from src.training_logger import TrainingLogger, save_generated_samples, plot_loss_curve
 from src.distributed_utils import (
     setup_distributed,
     cleanup_distributed,
@@ -525,6 +525,7 @@ def main(cfg: DictConfig):
                 checkpoint_path,
             )
             print(f"Saved best model to {checkpoint_path}")
+            plot_loss_curve(logger, output_dir)
 
         # Save checkpoint every N epochs (main process only)
         checkpoint_every_n = cfg.training.get('checkpoint_every_n_epochs', 0)
@@ -546,6 +547,7 @@ def main(cfg: DictConfig):
                 checkpoint_path,
             )
             print(f"Saved checkpoint to {checkpoint_path}")
+            plot_loss_curve(logger, output_dir)
 
         # Barrier before next epoch
         barrier()
@@ -561,6 +563,7 @@ def main(cfg: DictConfig):
     if is_main:
         print(f"Test loss: {test_loss:.4f}")
         logger.log_test(test_loss=test_loss)
+        plot_loss_curve(logger, output_dir)
 
     # Final AR evaluation on test set (main process only)
     if is_main and cfg.training.get('ar_eval_enabled', False):
