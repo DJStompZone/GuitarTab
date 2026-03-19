@@ -98,7 +98,7 @@ def main():
     parser.add_argument("--max-pitch", type=int, default=127)
     parser.add_argument("--max-time-shift", type=int, default=500)
     parser.add_argument("--num-strings", type=int, default=6)
-    parser.add_argument("--num-frets", type=int, default=21)
+    parser.add_argument("--num-frets", type=int, default=25, help="Number of frets (match configs/data/*.yaml)")
     parser.add_argument("--output-format", type=str, default="v1")
 
     # Parameters for 'reverse' method (timeline-based matching)
@@ -197,7 +197,7 @@ def main():
         except ValueError:
             pred_tokens = single_pred_ids
 
-        # Apply alignment with method-specific parameters
+        # Apply alignment with method-specific parameters (num_frets from config)
         if args.method == 'reverse':
             # Timeline-based matching with additional parameters
             aligned_ids, stats = post_process_pitch_alignment(
@@ -205,6 +205,7 @@ def main():
                 pred_ids=pred_tokens,
                 input_vocab=input_vocab,
                 output_vocab=output_vocab,
+                num_frets=num_frets,
                 pitch_threshold=args.pitch_threshold,
                 time_threshold=args.time_threshold,
                 output_format=output_format
@@ -216,6 +217,7 @@ def main():
                 pred_ids=pred_tokens,
                 input_vocab=input_vocab,
                 output_vocab=output_vocab,
+                num_frets=num_frets,
                 output_format=output_format
             )
 

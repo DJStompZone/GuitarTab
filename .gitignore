@@ -17,3 +17,5 @@ outputs/
 .vscode/
 CLAUDE.md
 GEMINI.md
+.cursor/
+.agent/

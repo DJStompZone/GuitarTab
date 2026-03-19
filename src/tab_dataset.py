@@ -307,11 +307,15 @@ class TabDataset:
         format_desc = format_descriptions.get(output_format, "unknown")
         print(f"Output format: {output_format} ({format_desc})")
         
+        self.max_pitch = max_pitch
+        self.max_time_shift = max_time_shift
+        self.num_strings = num_strings
         self.input_vocab, self.output_vocab = build_vocabulary(
             max_pitch=max_pitch,
             max_time_shift=max_time_shift,
             num_strings=num_strings,
             num_frets=num_frets,
+            output_format=output_format,
         )
 
         print(f"Input vocab size: {self.input_vocab.vocab_size}")
@@ -339,7 +343,7 @@ class TabDataset:
 
                 # Convert to events with bar positions
                 input_events, output_events, bar_positions = dadagp_to_events(
-                    dadagp_tokens
+                    dadagp_tokens, max_time_shift=self.max_time_shift
                 )
 
                 # Convert to IDs
@@ -430,9 +434,10 @@ class TabDataset:
             input_seg = input_ids[start_input_pos:end_input_pos]
             output_seg = output_ids[start_output_pos:end_output_pos]
 
-            # Only keep substantial segments
+            # Only keep substantial segments and filter out those with UNK tokens
             if len(input_seg) > self.max_sequence_length // 10:
-                segments.append((input_seg, output_seg))
+                if self.input_vocab.unk_id not in input_seg and self.output_vocab.unk_id not in output_seg:
+                    segments.append((input_seg, output_seg))
 
             # Move to next bar (50% overlap for context)
             overlap_bars = (split_bar_idx - current_bar_idx) // 2

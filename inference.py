@@ -165,14 +165,21 @@ def main(cfg: DictConfig):
     print(f"Evaluating on {cfg.data.selected_files_json}")
     print("=" * 80)
 
+    use_constrained = cfg.get("constrained_decoding", False)
+    if use_constrained:
+        print("Constrained decoding: enabled")
+
     metrics, (input_ids, targets, predictions) = generate_and_compute_accuracy(
         model=model,
         dataloader=dataloader,
         output_vocab=dataset.output_vocab,
+        input_vocab=dataset.input_vocab,
         device=device,
         max_length=cfg.training.get('ar_eval_max_length', 1024),
         num_beams=cfg.training.get('ar_eval_num_beams', 1),
-        max_batches=cfg.get('max_eval_batches', None)  # None = all batches
+        max_batches=cfg.get('max_eval_batches', None),  # None = all batches
+        use_constrained_decoding=use_constrained,
+        num_frets=cfg.data.num_frets,
     )
 
     # Save predictions and targets

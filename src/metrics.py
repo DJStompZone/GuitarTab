@@ -433,6 +433,8 @@ def generate_and_compute_accuracy(
     use_teacher_forcing: bool = True,  # NEW
     temperature: float = 1.0,  # NEW
     input_vocab = None,  # NEW: needed for tuning inference in v2
+    use_constrained_decoding: bool = False,
+    num_frets: int = 25,
 ) -> tuple[TabAccuracyMetrics, tuple[torch.Tensor, torch.Tensor, torch.Tensor]]:
     """
     Generate sequences autoregressively and compute accuracy.
@@ -479,6 +481,13 @@ def generate_and_compute_accuracy(
             else:
                 start_token_id = None  # Will use BOS=1
 
+            logits_processor = None
+            if use_constrained_decoding and input_vocab is not None:
+                from src.constrained_decoding import create_constrained_processor
+                logits_processor = create_constrained_processor(
+                    input_ids, input_vocab, output_vocab, num_frets=num_frets, device=device
+                )
+
             # Generate (now uses custom implementation)
             generated = model.generate(
                 input_ids=input_ids,
@@ -488,7 +497,8 @@ def generate_and_compute_accuracy(
                 eos_token_id=output_vocab.eos_id if hasattr(output_vocab, "eos_id") else 2,
                 pad_token_id=output_vocab.pad_id,
                 temperature=temperature,
-                verbose=False
+                verbose=False,
+                logits_processor=logits_processor,
             )
 
             # Pad/trim both generated and targets to max_length for uniform shape

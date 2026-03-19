@@ -14,7 +14,7 @@ max_sequence_length: 512
 max_pitch: 127
 max_time_shift: 500
 num_strings: 6
-num_frets: 21
+num_frets: 25
 
 # Train/val/test split
 train_ratio: 0.7

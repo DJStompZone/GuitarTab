@@ -1,0 +1,198 @@
+Found 26181 .tokens.txt files.
+Vocab: max_pitch=127, max_time_shift=500, num_strings=6, num_frets=21, output_format=v1
+
+[ERROR] Failed to process DadaGP-v1.1/1/1 God/1 God - Loom.gp4.tokens.txt: Invalid string number: 7
+[ERROR] Failed to process DadaGP-v1.1/L/Linkin Park/Linkin Park - Papercut.gp3.tokens.txt: Invalid string number: 7
+[ERROR] Failed to process DadaGP-v1.1/L/Linkin Park/Linkin Park - With You (3).gp4.tokens.txt: Invalid string number: 7
+[ERROR] Failed to process DadaGP-v1.1/L/Liquid Tension Experiment/Liquid Tension Experiment - Acid Rain (2).gp3.tokens.txt: Invalid string number: 7
+[ERROR] Failed to process DadaGP-v1.1/L/La Renga/Renga (La) - Las Cosas Que Hace.gp3.tokens.txt: Invalid string number: 7
+[ERROR] Failed to process DadaGP-v1.1/L/Latte & i suoi derivati/Latte & i suoi derivati - Me so_' _'ngrifato.gp3.tokens.txt: Invalid string number: 7
+[ERROR] Failed to process DadaGP-v1.1/L/Lady Pank/Lady Pank - Wciaz Bardziej Obcy (2).gp4.tokens.txt: Invalid string number: 7
+[ERROR] Failed to process DadaGP-v1.1/L/Limp Bizkit/Limp Bizkit - Just Drop Dead.gp4.tokens.txt: Invalid string number: 7
+[ERROR] Failed to process DadaGP-v1.1/L/Limp Bizkit/Limp Bizkit - Take A Look Around (2).gp3.tokens.txt: Invalid string number: 7
+[ERROR] Failed to process DadaGP-v1.1/D/Dream Theater/Dream Theater - A Change Of Seasons VII .gp3.tokens.txt: Invalid string number: 7
+[ERROR] Failed to process DadaGP-v1.1/D/Dream Theater/Dream Theater - The Glass Prison (arpeggios).gp3.tokens.txt: Invalid string number: 7
+[ERROR] Failed to process DadaGP-v1.1/D/Dream Theater/Dream Theater - Through My Words [Variation of Live Scenes].gp3.tokens.txt: Invalid string number: 7
+[ERROR] Failed to process DadaGP-v1.1/D/Dream Theater/Dream Theater - The Test That Stumped Them All (2).gp3.tokens.txt: Invalid string number: 7
+[ERROR] Failed to process DadaGP-v1.1/D/Dream Theater/Dream Theater - The Glass Prison (Parts).gp3.tokens.txt: Invalid string number: 7
+[ERROR] Failed to process DadaGP-v1.1/D/Dream Theater/Dream Theater - Dance Of Eternity (Intro).gp4.tokens.txt: Invalid string number: 7
+[ERROR] Failed to process DadaGP-v1.1/D/Dream Theater/Dream Theater - A Change Of Seasons V - Another World.gp3.gp3.tokens.txt: Invalid string number: 7
+[ERROR] Failed to process DadaGP-v1.1/D/Dream Theater/Dream Theater - Lie (2).gp3.tokens.txt: Invalid string number: 7
+[ERROR] Failed to process DadaGP-v1.1/D/Dream Theater/Dream Theater - Just Let Me Breathe.gp3.tokens.txt: Invalid string number: 7
+[ERROR] Failed to process DadaGP-v1.1/D/Dream Theater/Dream Theater - Finally Free (2).gp3.tokens.txt: Invalid string number: 7
+[ERROR] Failed to process DadaGP-v1.1/D/Dream Theater/Dream Theater - In The Name Of God (2).gp4.tokens.txt: Invalid string number: 7
+[ERROR] Failed to process DadaGP-v1.1/D/Dream Theater/Dream Theater - Lie (4).gp3.tokens.txt: Invalid string number: 7
+[ERROR] Failed to process DadaGP-v1.1/D/Dream Theater/Dream Theater - A Change Of Seasons (intro).gp3.tokens.txt: Invalid string number: 7
+[ERROR] Failed to process DadaGP-v1.1/D/Dream Theater/Dream Theater - A Change Of Seasons VI - The Inevitable Summer.gp3.gp3.tokens.txt: Invalid string number: 7
+[ERROR] Failed to process DadaGP-v1.1/D/Dream Theater/Dream Theater - The Dance of Eternity.gp3.tokens.txt: Invalid string number: 7
+[ERROR] Failed to process DadaGP-v1.1/D/Dream Theater/Dream Theater - Lie (3).gp3.tokens.txt: Invalid string number: 7
+[ERROR] Failed to process DadaGP-v1.1/D/Martyr_7321/Martyr_7321 - New Concept Album - Stagnent.gp4.tokens.txt: Invalid string number: 7
+[ERROR] Failed to process DadaGP-v1.1/D/Martyr_7321/Martyr_7321 - Vampire Hunter D - Scene 1.gp4.tokens.txt: Invalid string number: 7
+[ERROR] Failed to process DadaGP-v1.1/D/Deftones/Deftones - Bloody Cape (2).gp4.tokens.txt: Invalid string number: 7
+[ERROR] Failed to process DadaGP-v1.1/D/Dimmu Borgir/Dimmu Borgir - Metal Heart (3).gp3.tokens.txt: Invalid string number: 7
+[ERROR] Failed to process DadaGP-v1.1/D/Dimmu Borgir/Dimmu Borgir - Metal Heart (3).gp4.tokens.txt: Invalid string number: 7
+[ERROR] Failed to process DadaGP-v1.1/D/Dzem/Dzem - List Do M.gp4.tokens.txt: Invalid string number: 7
+[ERROR] Failed to process DadaGP-v1.1/D/Dark Hymners/Dark Hymners - Deadly Powerfull.gp4.tokens.txt: Invalid string number: 7
+[ERROR] Failed to process DadaGP-v1.1/D/Dogma/Dogma - Diesel.gp4.tokens.txt: Invalid string number: 7
+[ERROR] Failed to process DadaGP-v1.1/D/Deep Purple/Deep Purple - Smoke On The Water (2).gp3.tokens.txt: Invalid string number: 7
+[ERROR] Failed to process DadaGP-v1.1/C/Coal Chamber/Coal Chamber - Fiend.gp3.tokens.txt: Invalid string number: 7
+[ERROR] Failed to process DadaGP-v1.1/C/Coal Chamber/Coal Chamber - Rowboat.gp4.tokens.txt: Invalid string number: 7
+[ERROR] Failed to process DadaGP-v1.1/C/Covenant/Covenant - The Chasm.gp4.tokens.txt: Invalid string number: 7
+[ERROR] Failed to process DadaGP-v1.1/C/Christofer Axelsson And The Genocide Riders/Christofer Axelsson And The Genocide Riders - Far Beyond The Call Of Duty.gp4.tokens.txt: Invalid string number: 7
+[ERROR] Failed to process DadaGP-v1.1/C/Corsis/Corsis - War Of Men.gp4.tokens.txt: Invalid string number: 7
+[ERROR] Failed to process DadaGP-v1.1/C/Corsis/Corsis - Flight Of The Gryphon.gp4.tokens.txt: Invalid string number: 7
+[ERROR] Failed to process DadaGP-v1.1/C/Competition/Competition - Damage And Wounds.gp3.tokens.txt: Invalid string number: 7
+[ERROR] Failed to process DadaGP-v1.1/C/Cannibal Corpse/Cannibal Corpse - Unleashing The Bloodthirsty.gp3.tokens.txt: Invalid string number: 7
+[ERROR] Failed to process DadaGP-v1.1/C/Cannibal Corpse/Cannibal Corpse - Compelled To Lacerate.gp4.tokens.txt: Invalid string number: 7
+[ERROR] Failed to process DadaGP-v1.1/C/Cannibal Corpse/Cannibal Corpse - Peverse Suffering.gp4.tokens.txt: Invalid string number: 7
+[ERROR] Failed to process DadaGP-v1.1/C/Cannibal Corpse/Cannibal Corpse - I Will Kill You.gp4.tokens.txt: Invalid string number: 7
+[ERROR] Failed to process DadaGP-v1.1/C/Cannibal Corpse/Cannibal Corpse - Gallery Of Suicide.gp3.tokens.txt: Invalid string number: 7
+[ERROR] Failed to process DadaGP-v1.1/C/Cannibal Corpse/Cannibal Corpse - Compelled To Lacerate.gp3.tokens.txt: Invalid string number: 7
+[ERROR] Failed to process DadaGP-v1.1/C/Cannibal Corpse/Cannibal Corpse - From Skin To Liquid (2).gp4.tokens.txt: Invalid string number: 7
+[ERROR] Failed to process DadaGP-v1.1/C/Cannibal Corpse/Cannibal Corpse - Frantic Disembowelment.gp4.tokens.txt: Invalid string number: 7
+[ERROR] Failed to process DadaGP-v1.1/C/Chopin, Frederic/Chopin, Frederic - Prelude  No. 6, Opus 28.gp4.tokens.txt: Invalid string number: 7
+[ERROR] Failed to process DadaGP-v1.1/C/Carcass/Carcass - Heartwork (2).gp4.tokens.txt: Invalid string number: 7
+[ERROR] Failed to process DadaGP-v1.1/C/Carcass/Carcass - Heartwork.gp4.tokens.txt: Invalid string number: 7
+[ERROR] Failed to process DadaGP-v1.1/C/Carcass/Carcass - Forensic Clinicism, The Sanguine Article.gp4.tokens.txt: Invalid string number: 7
+[ERROR] Failed to process DadaGP-v1.1/C/Camel/Camel - Spirit Of The Water.gp4.tokens.txt: Invalid string number: 7
+[ERROR] Failed to process DadaGP-v1.1/C/Cooley, Rusty/Cooley, Rusty - The Seven Deadly Sins.gp4.tokens.txt: Invalid string number: 7
+[ERROR] Failed to process DadaGP-v1.1/C/Composers of MSB/Composers Of MSB - Extreme Crusher.gp4.tokens.txt: Invalid string number: 7
+[ERROR] Failed to process DadaGP-v1.1/B/Brou/Brou - Terror Among Us.gp4.tokens.txt: Invalid string number: 7
+[ERROR] Failed to process DadaGP-v1.1/B/Beatles (The)/Beatles (The) - Fixing A Hole (2).gp4.tokens.txt: Invalid string number: 7
+[ERROR] Failed to process DadaGP-v1.1/B/Blues Brothers (The)/Blues Brothers (The) - Everybody Needs Somebody To Love.gp4.tokens.txt: Invalid string number: 7
+[ERROR] Failed to process DadaGP-v1.1/B/B'Z/B'Z - Bluesy Na Asa.gp4.tokens.txt: Invalid string number: 7
+[ERROR] Failed to process DadaGP-v1.1/B/B'Z/B'Z - Suna No Hanabira.gp4.tokens.txt: Invalid string number: 7
+[ERROR] Failed to process DadaGP-v1.1/B/Blindspott/Blindspott - PMF.gp4.tokens.txt: Invalid string number: 7
+[ERROR] Failed to process DadaGP-v1.1/B/Bach, Johann Sebastian/Bach, Johann Sebastian - Jesu, Joy Of Man's Desiring.gp4.tokens.txt: Invalid string number: 7
+[ERROR] Failed to process DadaGP-v1.1/B/Blessed/Blessed - Unholy Temple.gp4.tokens.txt: Invalid string number: 7
+[ERROR] Failed to process DadaGP-v1.1/I/In Extremo/In Extremo - Spielmannsfluch (2).gp4.tokens.txt: Invalid string number: 7
+[ERROR] Failed to process DadaGP-v1.1/M/Mr. Children/Mr. Children - Kurumi.gp4.tokens.txt: Invalid string number: 7
+[ERROR] Failed to process DadaGP-v1.1/M/Mokoma/Mokoma - Vade Retro, Satana!.gp3.tokens.txt: Invalid string number: 7
+[ERROR] Failed to process DadaGP-v1.1/M/Mokoma/Mokoma - Kasvot Kohti ItNN.gp3.tokens.txt: Invalid string number: 7
+[ERROR] Failed to process DadaGP-v1.1/M/Masacre/Masacre - Sangre En Mis Manos.gp4.tokens.txt: Invalid string number: 7
+[ERROR] Failed to process DadaGP-v1.1/M/Machine Head/Machine Head - Silver.gp3.tokens.txt: Invalid string number: 7
+[ERROR] Failed to process DadaGP-v1.1/M/My Dying Bride/My Dying Bride - Sear Me III.gp4.tokens.txt: Invalid string number: 7
+[ERROR] Failed to process DadaGP-v1.1/M/Morbid Angel/Morbid Angel - He Who Sleeps.gp4.tokens.txt: Invalid string number: 7
+[ERROR] Failed to process DadaGP-v1.1/M/Morbid Angel/Morbid Angel - Where The Slime Live (2).gp4.tokens.txt: Invalid string number: 7
+[ERROR] Failed to process DadaGP-v1.1/M/Morbid Angel/Morbid Angel - Where The Slime Live.gp3.tokens.txt: Invalid string number: 7
+[ERROR] Failed to process DadaGP-v1.1/M/Morbid Angel/Morbid Angel - Dominate (2).gp4.tokens.txt: Invalid string number: 7
+[ERROR] Failed to process DadaGP-v1.1/M/Manowar/Manowar - Fight For Freedom.gp3.tokens.txt: Invalid string number: 7
+[ERROR] Failed to process DadaGP-v1.1/M/Manowar/Manowar - I Believe.gp4.tokens.txt: Invalid string number: 7
+[ERROR] Failed to process DadaGP-v1.1/M/Manimal/Manimal - Take Me.gp4.tokens.txt: Invalid string number: 7
+[ERROR] Failed to process DadaGP-v1.1/M/Mar'syas Complex/[Mar'syas] Complex - You Say.gp3.tokens.txt: Invalid string number: 7
+[ERROR] Failed to process DadaGP-v1.1/M/Meshuggah/Meshuggah - Corridor of Chameleons.gp3.tokens.txt: Invalid string number: 7
+[ERROR] Failed to process DadaGP-v1.1/M/Meshuggah/Meshuggah - Gods Of Rapture.gp4.tokens.txt: Invalid string number: 7
+[ERROR] Failed to process DadaGP-v1.1/M/Meshuggah/Meshuggah - Transfixion.gp3.tokens.txt: Invalid string number: 7
+[ERROR] Failed to process DadaGP-v1.1/M/Meshuggah/Meshuggah - Sane.gp4.tokens.txt: Invalid string number: 7
+[ERROR] Failed to process DadaGP-v1.1/M/Meshuggah/Meshuggah - Humiliative.gp3.tokens.txt: Invalid string number: 7
+[ERROR] Failed to process DadaGP-v1.1/M/Meshuggah/Meshuggah - Rational Gaze.gp4.tokens.txt: Invalid string number: 7
+[ERROR] Failed to process DadaGP-v1.1/M/Meshuggah/Meshuggah - Neurotica.gp4.tokens.txt: Invalid string number: 7
+[ERROR] Failed to process DadaGP-v1.1/M/Meshuggah/Meshuggah - New Millenium Cyanide Christ (2).gp4.tokens.txt: Invalid string number: 7
+[ERROR] Failed to process DadaGP-v1.1/M/Meshuggah/Meshuggah - Rational Gaze (2).gp4.tokens.txt: Invalid string number: 7
+[ERROR] Failed to process DadaGP-v1.1/M/Meshuggah/Meshuggah - Acrid Placidity.gp3.tokens.txt: Invalid string number: 7
+[ERROR] Failed to process DadaGP-v1.1/M/Meshuggah/Meshuggah - New Millenium Cyanide Christ.gp4.tokens.txt: Invalid string number: 7
+[ERROR] Failed to process DadaGP-v1.1/M/Meshuggah/Meshuggah - The Exquisite Machinery of Torture.gp3.tokens.txt: Invalid string number: 7
+[ERROR] Failed to process DadaGP-v1.1/M/Mind Flow/Mind Flow - Meeting Her Eyes.gp4.tokens.txt: Invalid string number: 7
+[ERROR] Failed to process DadaGP-v1.1/M/Malmsteen, Yngwie/Malmsteen, Yngwie - The 7th Sign (2).gp4.tokens.txt: Invalid string number: 7
+[ERROR] Failed to process DadaGP-v1.1/T/Townsend, Devin/Townsend, Devin - Irish Maiden.gp3.tokens.txt: Invalid string number: 7
+[ERROR] Failed to process DadaGP-v1.1/T/Trans-Siberian Orchestra/Trans-Siberian Orchestra (TSO) - Wizards In Winter.gp4.tokens.txt: Invalid string number: 7
+[ERROR] Failed to process DadaGP-v1.1/S/Sonata Arctica/Sonata Arctica - Wildfire.gp4.tokens.txt: Invalid string number: 7
+[ERROR] Failed to process DadaGP-v1.1/S/Stuck Mojo/Stuck Mojo - Trick.gp4.tokens.txt: Invalid string number: 7
+[ERROR] Failed to process DadaGP-v1.1/S/Soulfly/Soulfly - Bumbklaatt.gp4.tokens.txt: Invalid string number: 7
+[ERROR] Failed to process DadaGP-v1.1/S/Soulfly/Soulfly - No Fear = No Hope.gp4.tokens.txt: Invalid string number: 7
+[ERROR] Failed to process DadaGP-v1.1/S/SteelHeart/SteelHeart - She's Gone.gp4.tokens.txt: Invalid string number: 7
+[ERROR] Failed to process DadaGP-v1.1/S/Soilwork/Soilwork - A Predator_'s Portrait.gp4.tokens.txt: Invalid string number: 7
+[ERROR] Failed to process DadaGP-v1.1/S/Soilwork/Soilwork - Millionflame.gp4.tokens.txt: Invalid string number: 7
+[ERROR] Failed to process DadaGP-v1.1/S/Satriani, Joe/Satriani, Joe - The Traveler.gp3.tokens.txt: Invalid string number: 7
+[ERROR] Failed to process DadaGP-v1.1/S/Satriani, Joe/Satriani, Joe - Lifestyle.gp4.tokens.txt: Invalid string number: 7
+[ERROR] Failed to process DadaGP-v1.1/S/Satriani, Joe/Satriani, Joe - Midnight (2).gp3.tokens.txt: Invalid string number: 7
+[ERROR] Failed to process DadaGP-v1.1/S/Silencer/Silencer - Taklamakan.gp4.tokens.txt: Invalid string number: 7
+[ERROR] Failed to process DadaGP-v1.1/S/Staind/Staind - Take it inside.gp3.tokens.txt: Invalid string number: 7
+[ERROR] Failed to process DadaGP-v1.1/S/Silverchair/Silverchair - After All This Years (Intro).gp4.tokens.txt: Invalid string number: 7
+[ERROR] Failed to process DadaGP-v1.1/S/Symphony X/Symphony X - In The Dragon_'s Den (4).gp3.tokens.txt: Invalid string number: 7
+[ERROR] Failed to process DadaGP-v1.1/S/Shock Non Stop/Shock Non Stop - Dawn Of The Dead.gp4.tokens.txt: Invalid string number: 7
+[ERROR] Failed to process DadaGP-v1.1/S/Suicidal Tendencies/Suicidal Tendencies - Which Way To Free.gp3.tokens.txt: Invalid string number: 7
+[ERROR] Failed to process DadaGP-v1.1/U/Unearth/Unearth - Black Hearts Now Reign.gp4.tokens.txt: Invalid string number: 7
+[ERROR] Failed to process DadaGP-v1.1/U/Unearth/Unearth - My Heart Bleeds No Longer.gp4.tokens.txt: Invalid string number: 7
+[ERROR] Failed to process DadaGP-v1.1/U/Unearth/Unearth - Bloodlust Of The Human Condition.gp4.tokens.txt: Invalid string number: 7
+[ERROR] Failed to process DadaGP-v1.1/J/Jethro Tull/Jethro Tull - Locomotive Breath.gp4.tokens.txt: Invalid string number: 7
+[ERROR] Failed to process DadaGP-v1.1/J/Judy and Mary/Judy And Mary - Kaerenai Futari.gp4.tokens.txt: Invalid string number: 7
+[ERROR] Failed to process DadaGP-v1.1/J/Jones, Dustin/Jones, Dustin - Wrestling With Entropy.gp4.tokens.txt: Invalid string number: 7
+[ERROR] Failed to process DadaGP-v1.1/J/Jodrey, Andrew/Jodrey, Andrew - Skin Them Alive.gp4.tokens.txt: Invalid string number: 7
+[ERROR] Failed to process DadaGP-v1.1/V/Vulcano/Vulcano - Gates Of Iron.gp4.tokens.txt: Invalid string number: 7
+[ERROR] Failed to process DadaGP-v1.1/V/Vai, Steve/Vai, Steve - The Audience Is Listening.gp3.tokens.txt: Invalid string number: 7
+[ERROR] Failed to process DadaGP-v1.1/V/Vai, Steve/Vai, Steve - touching tongues (2).gp3.tokens.txt: Invalid string number: 7
+[ERROR] Failed to process DadaGP-v1.1/V/Vai, Steve/Vai, Steve - 7 String Song.gp4.tokens.txt: Invalid string number: 7
+[ERROR] Failed to process DadaGP-v1.1/V/Vai, Steve/Vai, Steve - Dave's Party Piece.gp4.tokens.txt: Invalid string number: 7
+[ERROR] Failed to process DadaGP-v1.1/V/Vai, Steve/Vai, Steve - Juice (3).gp4.tokens.txt: Invalid string number: 7
+[ERROR] Failed to process DadaGP-v1.1/V/Vai, Steve/Vai, Steve - Juice (2).gp4.tokens.txt: Invalid string number: 7
+[ERROR] Failed to process DadaGP-v1.1/V/Vai, Steve/Vai, Steve - The Mysterious Murder Of Christian Tiera_'s Lover.gp4.tokens.txt: Invalid string number: 7
+[ERROR] Failed to process DadaGP-v1.1/V/Vai, Steve/Vai, Steve - Ya-Yo Gakk.gp4.tokens.txt: Invalid string number: 7
+[ERROR] Failed to process DadaGP-v1.1/V/Villodo, Angel/Villodo, Angel - El Choclo.gp4.tokens.txt: Invalid string number: 7
+[ERROR] Failed to process DadaGP-v1.1/V/velikicirkussum, scalpel/velikicirkussum, scalpel - Desert Funky.gp3.tokens.txt: Invalid string number: 7
+[ERROR] Failed to process DadaGP-v1.1/V/Vintersorg/Vintersorg - Till Fjalls.gp4.tokens.txt: Invalid string number: 7
+[ERROR] Failed to process DadaGP-v1.1/V/Vox Artis/Vox Artis - Lunatic_'s Waltz.gp4.tokens.txt: Invalid string number: 7
+[ERROR] Failed to process DadaGP-v1.1/N/National Anthems/National Anthems - Polish National Anthem.gp4.tokens.txt: Invalid string number: 7
+[ERROR] Failed to process DadaGP-v1.1/N/Nootzaak/Nootzaak - Kneus En Holma Rock.gp3.tokens.txt: Invalid string number: 7
+[ERROR] Failed to process DadaGP-v1.1/N/Nevermore/Nevermore - My Acid Words (2).gp4.tokens.txt: Invalid string number: 7
+[ERROR] Failed to process DadaGP-v1.1/N/Nevermore/Nevermore - Inside Four Walls.gp3.tokens.txt: Invalid string number: 7
+[ERROR] Failed to process DadaGP-v1.1/N/Nevermore/Nevermore - We Desintegrate.gp4.tokens.txt: Invalid string number: 7
+[ERROR] Failed to process DadaGP-v1.1/N/Nevermore/Nevermore - I, Voyager.gp4.tokens.txt: Invalid string number: 7
+[ERROR] Failed to process DadaGP-v1.1/N/Nevermore/Nevermore - Narcosynthesis.gp3.tokens.txt: Invalid string number: 7
+[ERROR] Failed to process DadaGP-v1.1/N/Nevermore/Nevermore - Narcosynthesis (2).gp3.tokens.txt: Invalid string number: 7
+[ERROR] Failed to process DadaGP-v1.1/N/Narcotic Angel/Narcotic Angel - -1 - 0.gp4.tokens.txt: Invalid string number: 7
+[ERROR] Failed to process DadaGP-v1.1/N/Nocturnal Rites/Nocturnal Rites - Wake Up Dead.gp3.tokens.txt: Invalid string number: 7
+[ERROR] Failed to process DadaGP-v1.1/N/Nocturnal Rites/Nocturnal Rites - The Legend Lives On.gp3.tokens.txt: Invalid string number: 7
+[ERROR] Failed to process DadaGP-v1.1/N/New Reazon/New Reazon - Swarm Of Hell.gp4.tokens.txt: Invalid string number: 7
+[ERROR] Failed to process DadaGP-v1.1/E/Emperor/Emperor - The Eruption.gp4.tokens.txt: Invalid string number: 7
+[ERROR] Failed to process DadaGP-v1.1/E/Edguy/Edguy - Hymn.gp4.tokens.txt: Invalid string number: 7
+[ERROR] Failed to process DadaGP-v1.1/R/Ruda Salska/Ruda Salska - du rififi chez les branques.gp3.tokens.txt: Invalid string number: 7
+[ERROR] Failed to process DadaGP-v1.1/R/R.E.M/R.E.M. - Leaving New York.gp4.tokens.txt: Invalid string number: 7
+[ERROR] Failed to process DadaGP-v1.1/G/Gainsbourg, Serge/Gainsbourg, Serge - Comme Un Boomerang.gp4.tokens.txt: Invalid string number: 7
+[ERROR] Failed to process DadaGP-v1.1/G/Good Charlotte/Good Charlotte - wondering.gp3.tokens.txt: Invalid string number: 7
+[ERROR] Failed to process DadaGP-v1.1/G/Goddess Of Sin/Goddess Of Sin - Nosferatu.gp4.tokens.txt: Invalid string number: 7
+[ERROR] Failed to process DadaGP-v1.1/Z/Zakk Wylde & Black Label Society/Zakk Wylde & Black Label Society - Dead Meadow.gp4.tokens.txt: Invalid string number: 7
+[ERROR] Failed to process DadaGP-v1.1/Z/Zappa, Frank/Zappa, Frank - Nanook Rubs It.gp4.tokens.txt: Invalid string number: 7
+[ERROR] Failed to process DadaGP-v1.1/F/Flower Kings (The)/Flower Kings (The) - Days Gone By.gp4.tokens.txt: Invalid string number: 7
+[ERROR] Failed to process DadaGP-v1.1/F/Faith No More/Faith No More - Easy.gp3.tokens.txt: Invalid string number: 7
+[ERROR] Failed to process DadaGP-v1.1/F/Faith No More/Faith No More - Faith No More - Easy.gp3.tokens.txt: Invalid string number: 7
+[ERROR] Failed to process DadaGP-v1.1/F/Fabiano, Rodrigo/Fabiano, Rodrigo - WertyOs Song.gp3.tokens.txt: Invalid string number: 7
+[ERROR] Failed to process DadaGP-v1.1/F/flaw/flaw - Payback.gp3.tokens.txt: Invalid string number: 7
+[ERROR] Failed to process DadaGP-v1.1/F/Fear Factory/Fear Factory - Linchpin (2).gp4.tokens.txt: Invalid string number: 7
+[ERROR] Failed to process DadaGP-v1.1/F/Fear Factory/Fear Factory - Spinal Compression.gp4.tokens.txt: Invalid string number: 7
+[ERROR] Failed to process DadaGP-v1.1/F/Fear Factory/Fear Factory - Flashpoint.gp3.tokens.txt: Invalid string number: 7
+[ERROR] Failed to process DadaGP-v1.1/F/Fear Factory/Fear Factory - Messiah.gp4.tokens.txt: Invalid string number: 7
+[ERROR] Failed to process DadaGP-v1.1/F/Fear Factory/Fear Factory - Crisis.gp4.tokens.txt: Invalid string number: 7
+[ERROR] Failed to process DadaGP-v1.1/F/Fear Factory/Fear Factory - Concerto.gp4.tokens.txt: Invalid string number: 7
+[ERROR] Failed to process DadaGP-v1.1/F/Fear Factory/Fear Factory - Linchpin.gp3.tokens.txt: Invalid string number: 7
+[ERROR] Failed to process DadaGP-v1.1/F/Fear Factory/Fear Factory - Scumgrief.gp3.tokens.txt: Invalid string number: 7
+[ERROR] Failed to process DadaGP-v1.1/F/Fear Factory/Fear Factory - Moment Of Impact.gp4.tokens.txt: Invalid string number: 7
+[ERROR] Failed to process DadaGP-v1.1/F/Fear Factory/Fear Factory - Repentance.gp4.tokens.txt: Invalid string number: 7
+[ERROR] Failed to process DadaGP-v1.1/F/Final Fantasy/Final Fantasy 10 - To Zanarkand.gp4.tokens.txt: Invalid string number: 7
+[ERROR] Failed to process DadaGP-v1.1/Y/Yamaoka, Akira/Yamaoka, Akira - Angel's Thanatos.gp4.tokens.txt: Invalid string number: 7
+[ERROR] Failed to process DadaGP-v1.1/W/Weiner, Dave/Weiner, Dave - Dave's Party Piece (2).gp4.tokens.txt: Invalid string number: 7
+[ERROR] Failed to process DadaGP-v1.1/W/Within Temptation/Within Temptation - Jane Doe.gp4.tokens.txt: Invalid string number: 7
+[ERROR] Failed to process DadaGP-v1.1/W/Within Temptation/Within Temptation - The Dance.gp4.tokens.txt: Invalid string number: 7
+[ERROR] Failed to process DadaGP-v1.1/W/Williams, John/Williams, John - Requiem For A Dream.gp4.tokens.txt: Invalid string number: 7
+[ERROR] Failed to process DadaGP-v1.1/W/War Sucks/War Sucks - Hang Him High.gp4.tokens.txt: Invalid string number: 7
+[ERROR] Failed to process DadaGP-v1.1/W/War Sucks/War Sucks - Thunder.gp4.tokens.txt: Invalid string number: 7
+[ERROR] Failed to process DadaGP-v1.1/H/Hypocrisy/Hypocrisy - Osculum Obscenum (10 Years Of Chaos Version).gp4.tokens.txt: Invalid string number: 7
+[ERROR] Failed to process DadaGP-v1.1/H/Hypocrisy/Hypocrisy - War Within.gp3.tokens.txt: Invalid string number: 7
+[ERROR] Failed to process DadaGP-v1.1/H/Hypocrisy/Hypocrisy - Inseminated Adoption .gp4.tokens.txt: Invalid string number: 7
+[ERROR] Failed to process DadaGP-v1.1/H/Hypocrisy/Hypocrisy - Penetralia.gp4.tokens.txt: Invalid string number: 7
+[ERROR] Failed to process DadaGP-v1.1/H/Hypocrisy/Hypocrisy - The Fourth Dimension.gp3.tokens.txt: Invalid string number: 7
+[ERROR] Failed to process DadaGP-v1.1/H/Heavy Competition/Heavy Competition 11 - Monochrome Existance.gp4.tokens.txt: Invalid string number: 7
+[ERROR] Failed to process DadaGP-v1.1/K/Kreator/Kreator - Renewal.gp4.tokens.txt: Invalid string number: 7
+[ERROR] Failed to process DadaGP-v1.1/K/Korn/Korn - Lowrider (2).gp3.tokens.txt: Invalid string number: 7
+[ERROR] Failed to process DadaGP-v1.1/K/Korn/Korn - Twist (2).gp3.tokens.txt: Invalid string number: 7
+[ERROR] Failed to process DadaGP-v1.1/K/Korn/Korn - Helmet in the bush.gp3.tokens.txt: Invalid string number: 7
+[ERROR] Failed to process DadaGP-v1.1/K/Korn/Korn - Daddy [Demo 1993] P. II.gp4.tokens.txt: Invalid string number: 7
+[ERROR] Failed to process DadaGP-v1.1/K/Korn/Korn - Daddy.gp4.tokens.txt: Invalid string number: 7
+[ERROR] Failed to process DadaGP-v1.1/K/Korn/Korn - Earache MY Eye.gp3.tokens.txt: Invalid string number: 7
+[ERROR] Failed to process DadaGP-v1.1/K/Korn/Korn - A.D.I.D.A.S. (2).gp3.tokens.txt: Invalid string number: 7
+[ERROR] Failed to process DadaGP-v1.1/K/Korn/Korn - Good God (3).gp4.tokens.txt: Invalid string number: 7
+[ERROR] Failed to process DadaGP-v1.1/K/Korn/Korn - Clown (3).gp4.tokens.txt: Invalid string number: 7
+[ERROR] Failed to process DadaGP-v1.1/K/Korn/Korn - Daddy [Demo 1993] P. I.gp4.tokens.txt: Invalid string number: 7
+[ERROR] Failed to process DadaGP-v1.1/K/Korn/Korn - Divine.gp4.tokens.txt: Invalid string number: 7
+[ERROR] Failed to process DadaGP-v1.1/K/Korn/Korn - Y'all Want A Single (2).gp4.tokens.txt: Invalid string number: 7
+[ERROR] Failed to process DadaGP-v1.1/K/Korn/Korn - Korn - Let_'s get this party started.gp3.tokens.txt: Invalid string number: 7

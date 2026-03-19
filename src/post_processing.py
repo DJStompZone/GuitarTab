@@ -14,7 +14,7 @@ from src.tab_dataset import Vocabulary
 # ============================================================================
 
 GUITAR_TUNING = [40, 45, 50, 55, 59, 64]  # Standard tuning: E2, A2, D3, G3, B3, E4
-NUM_FRETS = 22  # Standard number of frets, adjust if needed
+# num_frets is passed from config by callers; default 25 to match configs/data/*.yaml
 
 
 # ============================================================================
@@ -74,22 +74,22 @@ def events_to_ids(events: List[Event], vocab: Vocabulary) -> List[int]:
 # Pitch and Fretboard Helpers
 # ============================================================================
 
-def pitch_to_frets(pitch: int) -> List[Tuple[int, int]]:
-    """Finds all possible (string, fret) combinations for a given MIDI pitch."""
+def pitch_to_frets(pitch: int, num_frets: int = 25) -> List[Tuple[int, int]]:
+    """Finds all possible (string, fret) combinations for a given MIDI pitch. num_frets should match config."""
     possible_frets = []
     for string_idx, open_pitch in enumerate(GUITAR_TUNING):
         fret = pitch - open_pitch
-        if 0 <= fret < NUM_FRETS:
+        if 0 <= fret < num_frets:
             possible_frets.append((string_idx + 1, fret)) # 1-based string index
     return possible_frets
 
 
-def find_closest_fret(pitch: int, original_pos: Tuple[int, int]) -> Optional[Tuple[int, int]]:
+def find_closest_fret(pitch: int, original_pos: Tuple[int, int], num_frets: int = 25) -> Optional[Tuple[int, int]]:
     """
     Finds the best (string, fret) for a pitch, closest to an original position.
     "Closeness" is measured by Manhattan distance on the fretboard.
     """
-    candidates = pitch_to_frets(pitch)
+    candidates = pitch_to_frets(pitch, num_frets)
     if not candidates:
         return None  # Pitch is not playable on the standard fretboard
 
@@ -118,6 +118,7 @@ def post_process_pitch_alignment(
     pred_ids: List[int],
     input_vocab: Vocabulary,
     output_vocab: Vocabulary,
+    num_frets: int = 25,
 ) -> List[int]:
     """
     Aligns the pitches of the predicted sequence with the input sequence.
@@ -129,6 +130,7 @@ def post_process_pitch_alignment(
         pred_ids: Predicted token IDs from the model (NOTE_ON, NOTE_OFF, TIME_SHIFT, TAB).
         input_vocab: Vocabulary for the input sequence.
         output_vocab: Vocabulary for the output sequence.
+        num_frets: Number of frets (valid 0..num_frets-1). Should match config (e.g. 25).
 
     Returns:
         A new list of predicted token IDs with pitches aligned.
@@ -221,7 +223,7 @@ def post_process_pitch_alignment(
                     original_tab = pred_events[tab_idx]
                     original_pos = (original_tab.string, original_tab.fret)
                     
-                    new_pos = find_closest_fret(correct_pitch, original_pos)
+                    new_pos = find_closest_fret(correct_pitch, original_pos, num_frets)
                     
                     if new_pos:
                         pred_events[tab_idx] = TabEvent(string=new_pos[0], fret=new_pos[1])

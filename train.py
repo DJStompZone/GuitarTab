@@ -73,6 +73,7 @@ def create_dataloaders(cfg: DictConfig) -> tuple[DataLoader, DataLoader, DataLoa
             max_time_shift=cfg.data.max_time_shift,
             num_strings=cfg.data.num_strings,
             num_frets=cfg.data.num_frets,
+            output_format=cfg.data.get("output_format", "v1"),
             max_files=cfg.data.max_files
         )
 
@@ -85,6 +86,7 @@ def create_dataloaders(cfg: DictConfig) -> tuple[DataLoader, DataLoader, DataLoa
             max_time_shift=cfg.data.max_time_shift,
             num_strings=cfg.data.num_strings,
             num_frets=cfg.data.num_frets,
+            output_format=cfg.data.get("output_format", "v1"),
             max_files=None
         )
 
@@ -97,6 +99,7 @@ def create_dataloaders(cfg: DictConfig) -> tuple[DataLoader, DataLoader, DataLoa
             max_time_shift=cfg.data.max_time_shift,
             num_strings=cfg.data.num_strings,
             num_frets=cfg.data.num_frets,
+            output_format=cfg.data.get("output_format", "v1"),
             max_files=None
         )
 
@@ -113,6 +116,7 @@ def create_dataloaders(cfg: DictConfig) -> tuple[DataLoader, DataLoader, DataLoa
             max_time_shift=cfg.data.max_time_shift,
             num_strings=cfg.data.num_strings,
             num_frets=cfg.data.num_frets,
+            output_format=cfg.data.get("output_format", "v1"),
             max_files=cfg.data.max_files
         )
 
@@ -385,7 +389,8 @@ def main(cfg: DictConfig):
                     device=device,
                     max_length=cfg.training.get('ar_eval_max_length', 1024),
                     num_beams=cfg.training.get('ar_eval_num_beams', 1),
-                    max_batches=cfg.training.get('ar_eval_max_batches', None)
+                    max_batches=cfg.training.get('ar_eval_max_batches', None),
+                    input_vocab=dataset.input_vocab,
                 )
                 print(f"AR Metrics: {ar_metrics}")
 
@@ -465,7 +470,8 @@ def main(cfg: DictConfig):
             max_length=cfg.training.get('ar_eval_max_length', 1024),
             num_beams=cfg.training.get('ar_eval_num_beams', 1),
             # max_batches=None  # Use all batches for final evaluation
-            max_batches=cfg.training.get('ar_eval_max_batches', None)
+            max_batches=cfg.training.get('ar_eval_max_batches', None),
+            input_vocab=dataset.input_vocab,
         )
         print(f"\nTest Set AR Metrics:")
         print(f"  Token Accuracy:  {test_ar_metrics.token_accuracy:.2%}")

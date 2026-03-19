@@ -180,6 +180,7 @@ class FrettingTransformer(nn.Module):
         pad_token_id: int = 0,
         temperature: float = 1.0,
         verbose: bool = False,
+        logits_processor=None,
         **kwargs
     ):
         """
@@ -259,7 +260,17 @@ class FrettingTransformer(nn.Module):
                 if temperature != 1.0:
                     logits = logits / temperature
 
-                next_token = torch.argmax(logits, dim=-1)      # [B]
+                if logits_processor is not None:
+                    dec_ids = torch.stack(generated, dim=1)  # [B, L]
+                    logits = logits_processor(dec_ids, logits)
+
+                next_token = torch.argmax(logits, dim=-1)  # [B]
+
+                if logits_processor is not None:
+                    if batch_size == 1 and not hasattr(logits_processor, "processors"):
+                        logits_processor.update_state(next_token[0].item())
+                    else:
+                        logits_processor.update_state(next_token)
 
             # apply EOS
             finished |= (next_token == eos_token_id)

@@ -234,6 +234,7 @@ def compute_pitch(string: int, fret: int, downtune: int = 0) -> int:
 
 def dadagp_to_events(
     dadagp_tokens: list[DadaGPToken],
+    max_time_shift: int = 500,
 ) -> tuple[list[Event], list[Event], list[tuple[int, int]]]:
     """
     Transform DadaGP tokens to our event format.
@@ -318,9 +319,13 @@ def dadagp_to_events(
             # Clear active notes
             active_notes = []
 
-            # Add TIME_SHIFT
-            input_events.append(TimeShiftEvent(delta=token.ticks))
-            output_events.append(TimeShiftEvent(delta=token.ticks))
+            # Add TIME_SHIFT in chunks to prevent UNK tokens
+            remaining_ticks = token.ticks
+            while remaining_ticks > 0:
+                shift = min(remaining_ticks, max_time_shift)
+                input_events.append(TimeShiftEvent(delta=shift))
+                output_events.append(TimeShiftEvent(delta=shift))
+                remaining_ticks -= shift
 
             # Advance time
             current_time += token.ticks
@@ -333,7 +338,7 @@ def dadagp_to_events(
     return input_events, output_events, bar_positions
 
 
-def parse_dadagp_file_to_events(file_path: str) -> tuple[list[Event], list[Event], list[tuple[int, int]]]:
+def parse_dadagp_file_to_events(file_path: str, max_time_shift: int = 500) -> tuple[list[Event], list[Event], list[tuple[int, int]]]:
     """
     Parse DadaGP tokens file and convert to our event format.
 
@@ -347,4 +352,4 @@ def parse_dadagp_file_to_events(file_path: str) -> tuple[list[Event], list[Event
         bar_positions: List of (input_idx, output_idx) where each bar starts
     """
     tokens = parse_dadagp_file(file_path)
-    return dadagp_to_events(tokens)
+    return dadagp_to_events(tokens, max_time_shift=max_time_shift)

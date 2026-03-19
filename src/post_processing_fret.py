@@ -19,7 +19,7 @@ GUITAR_TUNING = [40, 45, 50, 55, 59, 64]  # Standard tuning: E2, A2, D3, G3, B3,
 # This is opposite to standard guitar tab convention (where 1=High E),
 # but matches the array index order of GUITAR_TUNING.
 
-NUM_FRETS = 21  # Fret range 0-20
+# num_frets is passed from config (e.g. configs/data/*.yaml) by callers; no hardcoded default here.
 PITCH_ALIGNMENT_TIME_WINDOW = 960  # Ticks (approx 2 beats at 480 tpq)
 
 
@@ -102,10 +102,10 @@ def get_pitch_from_tab(string: int, fret: int, tuning_offset: int = 0) -> int:
     return 0  # Invalid
 
 
-def pitch_to_frets(pitch: int, tuning_offset: int = 0) -> List[Tuple[int, int]]:
+def pitch_to_frets(pitch: int, num_frets: int, tuning_offset: int = 0) -> List[Tuple[int, int]]:
     """
     Finds all possible (string, fret) combinations for a given MIDI pitch,
-    considering the global tuning offset.
+    considering the global tuning offset. num_frets should match config (e.g. 25 → frets 0-24).
     """
     possible_frets = []
     
@@ -118,17 +118,19 @@ def pitch_to_frets(pitch: int, tuning_offset: int = 0) -> List[Tuple[int, int]]:
         open_pitch_actual = open_pitch_standard - tuning_offset
         
         fret = pitch - open_pitch_actual
-        if 0 <= fret < NUM_FRETS:
+        if 0 <= fret < num_frets:
             possible_frets.append((string_num, fret))
             
     return possible_frets
 
 
-def find_closest_fret(pitch: int, original_pos: Tuple[int, int], tuning_offset: int = 0) -> Optional[Tuple[int, int]]:
+def find_closest_fret(
+    pitch: int, original_pos: Tuple[int, int], num_frets: int, tuning_offset: int = 0
+) -> Optional[Tuple[int, int]]:
     """
     Finds the best (string, fret) for a pitch, closest to an original position.
     """
-    candidates = pitch_to_frets(pitch, tuning_offset)
+    candidates = pitch_to_frets(pitch, num_frets, tuning_offset)
     if not candidates:
         return None  # Pitch is not playable
 
@@ -310,6 +312,7 @@ def post_process_pitch_alignment(
     pred_ids: List[int],
     input_vocab: Vocabulary,
     output_vocab: Vocabulary,
+    num_frets: int = 25,
     target_ids: Optional[List[int]] = None,
     original_pred_length: Optional[int] = None,
     output_format: Optional[str] = None
@@ -324,6 +327,7 @@ def post_process_pitch_alignment(
         pred_ids: Predicted output sequence
         input_vocab: Vocabulary for input tokens
         output_vocab: Vocabulary for output tokens
+        num_frets: Number of frets (valid frets 0..num_frets-1). Should match config (e.g. 25).
         target_ids: Optional target sequence (unused)
         original_pred_length: Optional original prediction length (unused)
         output_format: Output format ('v1' or 'v2'). If None, auto-detect from pred_ids.
@@ -396,7 +400,7 @@ def post_process_pitch_alignment(
             # Logic: Force Correction (Simple & Robust)
             # Find best physical position for target pitch, CONSIDERING TUNING OFFSET
             old_pos = (pred_note['string'], pred_note['fret'])
-            new_pos = find_closest_fret(target_pitch, old_pos, tuning_offset=tuning_offset)
+            new_pos = find_closest_fret(target_pitch, old_pos, num_frets, tuning_offset=tuning_offset)
             
             if new_pos:
                 new_string, new_fret = new_pos
