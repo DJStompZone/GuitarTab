@@ -12,6 +12,14 @@ exp: ${now:%Y-%m-%d_%H-%M}
 experiment_name: ${exp}
 output_dir: "outputs/${experiment_name}"
 
+hydra:
+  run:
+    # 把 Hydra 的 run 資料夾直接對齊我們自己的 output_dir
+    dir: ${output_dir}
+  sweep:
+    dir: "outputs/multirun"
+    subdir: "${hydra.job.num}"
+
 # Weights & Biases (optional)
 wandb:
   enabled: false

@@ -346,6 +346,25 @@ class TabDataset:
                     dadagp_tokens, max_time_shift=self.max_time_shift
                 )
 
+                # Adjust events according to output_format
+                if self.output_format == "v2":
+                    # v2: input = NOTE_ON, NOTE_OFF, TIME_SHIFT
+                    #     output = TAB, TIME_SHIFT (drop NOTE_ON/NOTE_OFF from output)
+                    filtered_output_events: list[Event] = []
+                    for ev in output_events:
+                        if isinstance(ev, (TabEvent, TimeShiftEvent)):
+                            filtered_output_events.append(ev)
+                    output_events = filtered_output_events
+                elif self.output_format == "v3":
+                    # v3: input = NOTE_ON, TIME_SHIFT (no NOTE_OFF in input)
+                    #     output = NOTE_ON, TAB, TIME_SHIFT (drop NOTE_OFF from output)
+                    input_events = [ev for ev in input_events if not isinstance(ev, NoteOffEvent)]
+                    filtered_output_events: list[Event] = []
+                    for ev in output_events:
+                        if isinstance(ev, (NoteOnEvent, TabEvent, TimeShiftEvent)):
+                            filtered_output_events.append(ev)
+                    output_events = filtered_output_events
+
                 # Convert to IDs
                 input_ids = events_to_ids(input_events, self.input_vocab)
                 output_ids = events_to_ids(output_events, self.output_vocab)
