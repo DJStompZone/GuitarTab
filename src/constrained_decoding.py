@@ -19,7 +19,6 @@ NUM_STRINGS = 6
 # num_frets default 25 to match configs/data/*.yaml; pass from config at call sites
 DEFAULT_NUM_FRETS = 25
 
-
 @dataclass
 class PitchToTabMapping:
     """Pre-computed mapping from pitch to valid (string, fret) combinations."""
@@ -170,9 +169,10 @@ class TablatureLogitsProcessor:
         mask = torch.zeros(self.vocab.vocab_size, dtype=torch.bool, device=device)
         
         if self.last_token_type == 'START':
-            # Can generate NOTE_ON (matching input pitch) or EOS
+            # Can generate NOTE_ON (matching input pitch); EOS only if sequence is complete
             self._add_valid_note_on_tokens(mask)
-            mask[self.vocab.eos_id] = True
+            if self._can_emit_eos():
+                mask[self.vocab.eos_id] = True
             
         elif self.last_token_type == 'NOTE_ON':
             # Must generate valid TAB for current pitch
@@ -185,21 +185,28 @@ class TablatureLogitsProcessor:
             
         elif self.last_token_type == 'NOTE_OFF':
             if len(self.active_notes) == 0:
-                # All notes closed: can generate TIME_SHIFT, NOTE_ON, or EOS
+                # All notes closed: can generate TIME_SHIFT/NOTE_ON; EOS only if sequence is complete
                 self._add_time_shift_tokens(mask)
                 self._add_valid_note_on_tokens(mask)
-                mask[self.vocab.eos_id] = True
+                if self._can_emit_eos():
+                    mask[self.vocab.eos_id] = True
             else:
                 # Still have active notes: can only close more or start new
                 self._add_valid_note_off_tokens(mask)
                 self._add_valid_note_on_tokens(mask)
                 
         elif self.last_token_type == 'TIME_SHIFT':
-            # After TIME_SHIFT: can generate NOTE_ON or EOS
+            # After TIME_SHIFT: can generate NOTE_ON/TIME_SHIFT; EOS only if sequence is complete
+            self._add_time_shift_tokens(mask)
             self._add_valid_note_on_tokens(mask)
-            mask[self.vocab.eos_id] = True
-        
+            if self._can_emit_eos():
+                mask[self.vocab.eos_id] = True
+
         return mask
+
+    def _can_emit_eos(self) -> bool:
+        """EOS is valid only after consuming all input pitches and closing all active notes."""
+        return self.pitch_idx >= len(self.input_pitches) and len(self.active_notes) == 0
     
     def _add_valid_note_on_tokens(self, mask: torch.Tensor):
         """Add valid NOTE_ON tokens to mask based on input pitch sequence."""

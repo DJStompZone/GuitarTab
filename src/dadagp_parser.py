@@ -275,20 +275,42 @@ def dadagp_to_events(
     # Track active notes (notes that haven't been turned off yet)
     active_notes: list[ActiveNote] = []
     current_time = 0
+    pending_wait_ticks = 0  # Coalesce consecutive waits, then emit TIME_SHIFT once
 
     input_events: list[Event] = []
     output_events: list[Event] = []
     bar_positions: list[tuple[int, int]] = []
+
+    def flush_pending_wait() -> None:
+        nonlocal pending_wait_ticks, current_time, active_notes
+        if pending_wait_ticks <= 0:
+            return
+        # Turn off all active notes (all notes end before this wait block)
+        for note in active_notes:
+            input_events.append(NoteOffEvent(pitch=note.pitch))
+            output_events.append(NoteOffEvent(pitch=note.pitch))
+        active_notes = []
+        # Emit TIME_SHIFT in chunks so total duration = pending_wait_ticks
+        remaining = pending_wait_ticks
+        while remaining > 0:
+            shift = min(remaining, max_time_shift)
+            input_events.append(TimeShiftEvent(delta=shift))
+            output_events.append(TimeShiftEvent(delta=shift))
+            remaining -= shift
+        current_time += pending_wait_ticks
+        pending_wait_ticks = 0
 
     # Process tokens
     for token in dadagp_tokens:
         # Track bar boundaries
         if isinstance(token, StructuralToken):
             if token.name == "new_measure":
+                flush_pending_wait()
                 bar_positions.append((len(input_events), len(output_events)))
             continue
 
         if isinstance(token, NoteToken):
+            flush_pending_wait()
             # Compute pitch
             pitch = compute_pitch(token.string, token.fret, metadata.downtune)
 
@@ -310,25 +332,10 @@ def dadagp_to_events(
             )
 
         elif isinstance(token, WaitToken):
-            # Turn off all active notes (simplification: assume all notes end at wait)
-            # This is a reasonable assumption for guitar tablature
-            for note in active_notes:
-                input_events.append(NoteOffEvent(pitch=note.pitch))
-                output_events.append(NoteOffEvent(pitch=note.pitch))
+            # Coalesce: sum with any following consecutive waits; flush when we see non-wait
+            pending_wait_ticks += token.ticks
 
-            # Clear active notes
-            active_notes = []
-
-            # Add TIME_SHIFT in chunks to prevent UNK tokens
-            remaining_ticks = token.ticks
-            while remaining_ticks > 0:
-                shift = min(remaining_ticks, max_time_shift)
-                input_events.append(TimeShiftEvent(delta=shift))
-                output_events.append(TimeShiftEvent(delta=shift))
-                remaining_ticks -= shift
-
-            # Advance time
-            current_time += token.ticks
+    flush_pending_wait()
 
     # Turn off any remaining active notes at the end
     for note in active_notes:

@@ -20,18 +20,22 @@ Constrained Decoding 功能演示
 import argparse
 import os
 import random
+from functools import partial
 from pathlib import Path
 from typing import Optional, Tuple, List, Any
 
+import numpy as np
 import torch
-from src.tab_dataset import build_vocabulary, events_to_ids
+from torch.utils.data import DataLoader, Dataset
+
+from src.tab_dataset import build_vocabulary, collate_fn, events_to_ids
 from src.dadagp_parser import parse_dadagp_file, dadagp_to_events
 from src.constrained_decoding import (
     TablatureLogitsProcessor,
     extract_pitches_from_input_ids,
     STANDARD_TUNING,
 )
-from src.metrics import compute_tablature_accuracy
+from src.metrics import compute_tablature_accuracy, generate_and_compute_accuracy
 from src.model import FrettingTransformer
 
 
@@ -110,6 +114,7 @@ def load_model_from_checkpoint(
 def load_first_n_bars(
     token_path: str,
     n_bars: int = 4,
+    start_bar: int = 1,
     max_pitch: int = 127,
     max_time_shift: int = 500,
     num_strings: int = 6,
@@ -119,7 +124,7 @@ def load_first_n_bars(
     output_vocab=None,
 ):
     """
-    從 .tokens.txt 載入前 n_bars 個小節的 input_ids / output_ids 與詞彙。
+    從 .tokens.txt 載入從 start_bar 開始的 n_bars 個小節 input_ids / output_ids 與詞彙。
     若提供 input_vocab, output_vocab（例如來自 checkpoint），則直接使用，不另建詞彙。
     回傳 (input_ids, output_ids, input_vocab, output_vocab, input_pitches)。
     """
@@ -140,10 +145,17 @@ def load_first_n_bars(
     input_ids = events_to_ids(input_events, input_vocab)
     output_ids = events_to_ids(output_events, output_vocab)
 
-    # 前 n_bars 小節：bar_positions[i] 為第 i+1 小節的起始 (input_idx, output_idx)
-    start_in, start_out = bar_positions[0]
-    if len(bar_positions) > n_bars:
-        end_in, end_out = bar_positions[n_bars][0], bar_positions[n_bars][1]
+    # bar_positions[i] 為第 i+1 小節起始，支援指定起始小節
+    total_bars = len(bar_positions)
+    if start_bar < 1 or start_bar > total_bars:
+        raise ValueError(f"start_bar 超出範圍: {start_bar} (有效範圍: 1..{total_bars})")
+
+    start_idx = start_bar - 1
+    end_idx = min(start_idx + max(n_bars, 1), total_bars)
+
+    start_in, start_out = bar_positions[start_idx]
+    if end_idx < total_bars:
+        end_in, end_out = bar_positions[end_idx][0], bar_positions[end_idx][1]
     else:
         end_in, end_out = len(input_ids), len(output_ids)
 
@@ -194,7 +206,7 @@ def model_generate_constrained(
     max_length: int = 1024,
     num_frets: int = 25,
 ) -> List[int]:
-    """使用 TablatureLogitsProcessor 做 constrained decoding，與 inference 同 model.generate 介面。"""
+    """使用 TablatureLogitsProcessor 做 constrained decoding，並逐步印出每步 constraint 狀態。"""
     processor = TablatureLogitsProcessor(
         output_vocab=output_vocab,
         input_pitches=input_pitches,
@@ -202,18 +214,67 @@ def model_generate_constrained(
         device=device,
     )
     processor.reset_state()
-    inp = torch.tensor([input_ids], dtype=torch.long, device=device)
-    mask = torch.ones_like(inp, device=device)
+    enc_inp = torch.tensor([input_ids], dtype=torch.long, device=device)
+    attention_mask = torch.ones_like(enc_inp, device=device)
+
+    # 與 model.generate 同邏輯，改成單筆逐步解碼，方便每一步印出 constraint。
     with torch.no_grad():
-        out = model.generate(
-            input_ids=inp,
-            attention_mask=mask,
-            max_length=max_length,
-            eos_token_id=output_vocab.eos_id,
-            pad_token_id=output_vocab.pad_id,
-            logits_processor=processor,
+        encoder_outputs = model.model.encoder(
+            input_ids=enc_inp,
+            attention_mask=attention_mask,
+            return_dict=True,
         )
-    return out[0].tolist()
+        enc_hidden = encoder_outputs.last_hidden_state
+
+        decoder_input = torch.tensor([[output_vocab.bos_id]], dtype=torch.long, device=device)
+        generated = [output_vocab.bos_id]
+        past_key_values = None
+
+        print("\n【逐步 Constraint 狀態（模型 constrained decoding）】")
+        print(f"  輸入音高序列長度: {len(input_pitches)}")
+        print(f"  前 30 個輸入音高: {input_pitches[:30]}{' ...' if len(input_pitches) > 30 else ''}")
+        print()
+
+        for step in range(1, max_length + 1):
+            decoder_outputs = model.model.decoder(
+                input_ids=decoder_input,
+                encoder_hidden_states=enc_hidden,
+                encoder_attention_mask=attention_mask,
+                past_key_values=past_key_values,
+                use_cache=True,
+                return_dict=True,
+            )
+            past_key_values = decoder_outputs.past_key_values
+            logits = model.model.lm_head(decoder_outputs.last_hidden_state[:, -1, :]).squeeze(0)
+            masked_logits = processor(torch.tensor(generated, device=device), logits)
+
+            valid_names = get_valid_token_names(processor, masked_logits)
+            next_id = int(torch.argmax(masked_logits).item())
+            next_token = output_vocab.id_to_token.get(next_id, "?")
+
+            print(f"--- Step {step} ---")
+            print(
+                "  狀態: "
+                f"last_type={processor.last_token_type}, "
+                f"active_notes={processor.active_notes[:8]}{' ...' if len(processor.active_notes) > 8 else ''}, "
+                f"pitch_idx={processor.pitch_idx}"
+            )
+            print(f"  本步允許 token 數量: {len(valid_names)}")
+            if len(valid_names) <= 25:
+                print(f"  允許 token: {valid_names}")
+            else:
+                print(f"  允許 token (前 12 + 後 5): {valid_names[:12]} ... {valid_names[-5:]}")
+            print(f"  -> 模型選擇: {next_token}")
+            print()
+
+            generated.append(next_id)
+            processor.update_state(next_id)
+
+            if next_id == output_vocab.eos_id:
+                break
+            decoder_input = torch.tensor([[next_id]], dtype=torch.long, device=device)
+
+    return generated
 
 
 def build_dummy_encoder_input(input_pitches: List[int], input_vocab, output_format: str = "v1") -> List[int]:
@@ -486,6 +547,97 @@ def print_token_accuracy(
     print()
 
 
+class _OneSegmentDataset(Dataset):
+    """單筆 (input_ids, output_ids)，與 TabDataset.__getitem__ 回傳格式相同（供 collate_fn 使用）。"""
+
+    def __init__(self, input_ids: List[int], output_ids: List[int]):
+        self.input_ids = np.asarray(input_ids, dtype=np.int64)
+        self.output_ids = np.asarray(output_ids, dtype=np.int64)
+
+    def __len__(self) -> int:
+        return 1
+
+    def __getitem__(self, idx: int) -> Tuple[np.ndarray, np.ndarray]:
+        return self.input_ids, self.output_ids
+
+
+def make_demo_metrics_dataloader(
+    seg_input: List[int],
+    seg_output: List[int],
+    input_vocab,
+    output_vocab,
+) -> DataLoader:
+    """
+    與訓練時 TabDataset 一致：output 序列為 BOS + 內容 + EOS，再經 collate_fn 組 batch。
+    """
+    out_with_special = [output_vocab.bos_id] + list(seg_output) + [output_vocab.eos_id]
+    ds = _OneSegmentDataset(seg_input, out_with_special)
+    collate = partial(
+        collate_fn,
+        input_pad_id=input_vocab.pad_id,
+        output_pad_id=output_vocab.pad_id,
+    )
+    return DataLoader(ds, batch_size=1, shuffle=False, collate_fn=collate)
+
+
+def print_metrics_via_generate_and_compute_accuracy(
+    model: FrettingTransformer,
+    seg_input: List[int],
+    seg_output: List[int],
+    input_vocab,
+    output_vocab,
+    device: str,
+    num_frets: int = 25,
+    max_length: int = 1024,
+    temperature: float = 1.0,
+):
+    """
+    與 train.py 相同：呼叫 src.metrics.generate_and_compute_accuracy（含 Difficulty）。
+    分別以 constrained / unconstrained 各跑一次單筆 batch。
+    """
+    loader = make_demo_metrics_dataloader(
+        seg_input, seg_output, input_vocab, output_vocab
+    )
+    print("=" * 70)
+    print("AR Metrics（與 train.py 相同：generate_and_compute_accuracy）")
+    print("=" * 70)
+
+    ar_constrained, _ = generate_and_compute_accuracy(
+        model=model,
+        dataloader=loader,
+        output_vocab=output_vocab,
+        device=device,
+        max_length=max_length,
+        max_batches=1,
+        input_vocab=input_vocab,
+        use_teacher_forcing=True,
+        temperature=temperature,
+        use_constrained_decoding=True,
+        num_frets=num_frets,
+    )
+    print("\n  【Constrained Decoding】")
+    print(f"    {ar_constrained}")
+    print(f"    Difficulty:      {ar_constrained.difficulty:.5f}")
+
+    ar_unconstrained, _ = generate_and_compute_accuracy(
+        model=model,
+        dataloader=loader,
+        output_vocab=output_vocab,
+        device=device,
+        max_length=max_length,
+        max_batches=1,
+        input_vocab=input_vocab,
+        use_teacher_forcing=True,
+        temperature=temperature,
+        use_constrained_decoding=False,
+        num_frets=num_frets,
+    )
+    print("\n  【無 Constrained Decoding】")
+    print(f"    {ar_unconstrained}")
+    print(f"    Difficulty:      {ar_unconstrained.difficulty:.5f}")
+    print()
+
+
 def demo_without_constraint():
     """對比：若無 constrained decoding，模型可能產生的錯誤範例。"""
     print("=" * 70)
@@ -539,7 +691,13 @@ if __name__ == "__main__":
         "--bars",
         type=int,
         default=1,
-        help="使用該曲前幾小節（預設 1）。",
+        help="從起始小節開始，使用幾個小節（預設 1）。",
+    )
+    parser.add_argument(
+        "--target-bar",
+        type=int,
+        default=None,
+        help="只看單一小節（1-based）。若設定則等同 --bars 1 並覆蓋起始小節。",
     )
     parser.add_argument(
         "--checkpoint",
@@ -564,11 +722,16 @@ if __name__ == "__main__":
             )
 
     if args.gp_path:
+        start_bar = args.target_bar if args.target_bar is not None else 1
+        bars_to_use = 1 if args.target_bar is not None else args.bars
         token_path, midi_path = resolve_token_and_midi_paths(
             args.gp_path, args.data_dir, args.midi_dir
         )
         print("=" * 70)
-        print("從 GP 檔案載入（前 {} 小節）".format(args.bars))
+        if args.target_bar is not None:
+            print("從 GP 檔案載入（僅第 {} 小節）".format(start_bar))
+        else:
+            print("從 GP 檔案載入（第 {} 小節起，共 {} 小節）".format(start_bar, bars_to_use))
         print("=" * 70)
         print(f"  GP/token: {args.gp_path}")
         print(f"  Token 檔: {token_path}")
@@ -577,17 +740,24 @@ if __name__ == "__main__":
 
         seg_input, seg_output, input_vocab, output_vocab, input_pitches = load_first_n_bars(
             token_path,
-            n_bars=args.bars,
+            n_bars=bars_to_use,
+            start_bar=start_bar,
             input_vocab=input_vocab,
             output_vocab=output_vocab,
             num_frets=data_cfg.get("num_frets", 25),
             output_format=data_cfg.get("output_format", "v1"),
         )
-        print(f"  前 {args.bars} 小節: input tokens {len(seg_input)}, output tokens {len(seg_output)}, 音高數 {len(input_pitches)}\n")
+        if args.target_bar is not None:
+            print(f"  第 {start_bar} 小節: input tokens {len(seg_input)}, output tokens {len(seg_output)}, 音高數 {len(input_pitches)}\n")
+        else:
+            print(f"  第 {start_bar} 小節起共 {bars_to_use} 小節: input tokens {len(seg_input)}, output tokens {len(seg_output)}, 音高數 {len(input_pitches)}\n")
 
         if model is not None:
             print("=" * 70)
-            print("Constrained Decoding 演示（歌曲前 {} 小節，使用模型）".format(args.bars))
+            if args.target_bar is not None:
+                print("Constrained Decoding 演示（歌曲第 {} 小節，使用模型）".format(start_bar))
+            else:
+                print("Constrained Decoding 演示（歌曲第 {} 小節起，共 {} 小節，使用模型）".format(start_bar, bars_to_use))
             print("=" * 70)
             constrained_ids = model_generate_constrained(
                 model, seg_input, output_vocab, input_pitches, device,
@@ -597,12 +767,20 @@ if __name__ == "__main__":
             output_vocab, input_pitches, constrained_ids = demo_single_sequence(
                 output_vocab=output_vocab,
                 input_pitches=input_pitches,
-                title="Constrained Decoding 演示（歌曲前 {} 小節）".format(args.bars),
+                title=(
+                    "Constrained Decoding 演示（歌曲第 {} 小節）".format(start_bar)
+                    if args.target_bar is not None
+                    else "Constrained Decoding 演示（歌曲第 {} 小節起，共 {} 小節）".format(start_bar, bars_to_use)
+                ),
                 ground_truth_output_ids=seg_output,
                 num_frets=data_cfg.get("num_frets", 25),
             )
+            
         gt_tokens = [output_vocab.id_to_token.get(i, "?") for i in seg_output]
-        print("【前 {} 小節 Ground Truth（來自 token 檔）】".format(args.bars))
+        if args.target_bar is not None:
+            print("【第 {} 小節 Ground Truth（來自 token 檔）】".format(start_bar))
+        else:
+            print("【第 {} 小節起共 {} 小節 Ground Truth（來自 token 檔）】".format(start_bar, bars_to_use))
         print("  " + " ".join(gt_tokens[:50]) + (" ..." if len(gt_tokens) > 50 else ""))
         print()
         ground_truth_ids = seg_output
@@ -659,12 +837,24 @@ if __name__ == "__main__":
     )
 
     if ground_truth_ids is not None:
-        print_token_accuracy(
-            output_vocab,
-            constrained_ids,
-            unconstrained_ids,
-            ground_truth_ids,
-        )
+        if model is not None:
+            print_metrics_via_generate_and_compute_accuracy(
+                model=model,
+                seg_input=seg_input,
+                seg_output=seg_output,
+                input_vocab=input_vocab,
+                output_vocab=output_vocab,
+                device=device,
+                num_frets=data_cfg.get("num_frets", 25),
+                max_length=1024,
+            )
+        else:
+            print_token_accuracy(
+                output_vocab,
+                constrained_ids,
+                unconstrained_ids,
+                ground_truth_ids,
+            )
 
     # demo_without_constraint()
     print("Done.")

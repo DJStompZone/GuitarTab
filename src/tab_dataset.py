@@ -6,7 +6,7 @@ Loads .tokens.txt files, converts to our event format, tokenizes, and segments.
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Optional, TypedDict
+from typing import Callable, Optional, TypedDict
 import numpy as np
 from tqdm import tqdm
 import torch
@@ -22,6 +22,62 @@ from src.dadagp_parser import (
     TimeShiftEvent,
     TabEvent,
 )
+
+
+# ============================================================================
+# Time shift schema
+# ============================================================================
+
+TICKS_PER_BEAT = 480
+
+# Allowed beat-fraction set for the new representation.
+# NOTE: This is dormant by default (time_shift_mode="ticks") so it won't
+# affect existing training until explicitly enabled.
+BEAT_FRACTION_PAIRS: list[tuple[int, int]] = [
+    # Long values (multi-beat)
+    (4, 1),
+    (2, 1),
+    (1, 1),
+    # Triplets / special groupings
+    (2, 3),
+    (1, 3),
+    (1, 2),
+    (1, 4),
+    (1, 6),
+    (1, 8),
+    (1, 12),
+    (1, 16),
+    (1, 24),
+    (1, 32),
+]
+
+
+def get_allowed_time_shift_ticks(
+    max_time_shift: int,
+    time_shift_mode: str = "ticks",
+) -> list[int]:
+    """
+    Returns the list of allowed TIME_SHIFT deltas (in ticks).
+
+    - "ticks": legacy behaviour, 1..max_time_shift (dense integer ticks)
+    - "beat_fraction": restricted to musically meaningful beat fractions,
+      still expressed as integer ticks, using TICKS_PER_BEAT=480.
+    """
+    if time_shift_mode == "ticks":
+        return list(range(1, max_time_shift + 1))
+    elif time_shift_mode == "beat_fraction":
+        allowed: set[int] = set()
+        for num, den in BEAT_FRACTION_PAIRS:
+            # Only keep exact integer multiples in ticks
+            ticks_num = TICKS_PER_BEAT * num
+            if ticks_num % den != 0:
+                continue
+            ticks = ticks_num // den
+            if 1 <= ticks <= max_time_shift:
+                allowed.add(ticks)
+        return sorted(allowed)
+    else:
+        raise ValueError(f"Unknown time_shift_mode: {time_shift_mode}")
 
 
 # ============================================================================
@@ -43,13 +99,17 @@ class Vocabulary:
     eos_id: int = 2
     unk_id: int = 3
 
+    # Optional: document which TIME_SHIFT deltas this vocab supports (in ticks)
+    time_shift_values: Optional[list[int]] = None
+
 
 def build_vocabulary(
     max_pitch: int = 127,
     max_time_shift: int = 500,
     num_strings: int = 6,
     num_frets: int = 21,
-    output_format: str = "v1",  
+    output_format: str = "v1",
+    time_shift_mode: str = "ticks",
 ) -> tuple[Vocabulary, Vocabulary]:
     """
     Build vocabularies for input and output sequences.
@@ -67,6 +127,12 @@ def build_vocabulary(
     Returns:
         Tuple of (input_vocab, output_vocab)
     """
+    # Decide TIME_SHIFT deltas used by both input/output vocab
+    time_shift_values = get_allowed_time_shift_ticks(
+        max_time_shift=max_time_shift,
+        time_shift_mode=time_shift_mode,
+    )
+
     # Build input vocabulary (NOTE_ON, NOTE_OFF, TIME_SHIFT)
     input_token_to_id: dict[str, int] = {}
     input_id_to_token: dict[int, str] = {}
@@ -94,7 +160,7 @@ def build_vocabulary(
             idx += 1
 
     # TIME_SHIFT tokens
-    for shift in range(1, max_time_shift + 1):
+    for shift in time_shift_values:
         token = f"TIME_SHIFT_{shift}"
         input_token_to_id[token] = idx
         input_id_to_token[idx] = token
@@ -108,6 +174,7 @@ def build_vocabulary(
         bos_id=1,
         eos_id=2,
         unk_id=3,
+        time_shift_values=time_shift_values,
     )
 
     # Build output vocabulary (NOTE_ON, NOTE_OFF, TIME_SHIFT, TAB)
@@ -125,7 +192,7 @@ def build_vocabulary(
         idx += 1
 
     if output_format in ("v1", "v3"):
-    # NOTE_ON tokens (for v1 and v3)
+        # NOTE_ON tokens (for v1 and v3)
         for pitch in range(max_pitch + 1):
             token = f"NOTE_ON_{pitch}"
             output_token_to_id[token] = idx
@@ -133,7 +200,7 @@ def build_vocabulary(
             idx += 1
 
     if output_format == "v1":
-    # NOTE_OFF tokens (only for v1)
+        # NOTE_OFF tokens (only for v1)
         for pitch in range(max_pitch + 1):
             token = f"NOTE_OFF_{pitch}"
             output_token_to_id[token] = idx
@@ -141,7 +208,7 @@ def build_vocabulary(
             idx += 1
 
     # TIME_SHIFT tokens (always present)
-    for shift in range(1, max_time_shift + 1):
+    for shift in time_shift_values:
         token = f"TIME_SHIFT_{shift}"
         output_token_to_id[token] = idx
         output_id_to_token[idx] = token
@@ -163,6 +230,7 @@ def build_vocabulary(
         bos_id=1,
         eos_id=2,
         unk_id=3,
+        time_shift_values=time_shift_values,
     )
 
     return input_vocab, output_vocab
@@ -212,6 +280,26 @@ def events_to_ids(events: list[Event], vocab: Vocabulary) -> list[int]:
 # ============================================================================
 # Bar-Aligned Splitting
 # ============================================================================
+
+
+def _remap_bar_positions_after_output_filter(
+    bar_positions: list[tuple[int, int]],
+    full_output_events: list[Event],
+    keep_event: Callable[[Event], bool],
+) -> list[tuple[int, int]]:
+    """
+    dadagp_to_events() records bar boundaries as indices into the *full* output
+    stream (NOTE_ON, NOTE_OFF, TIME_SHIFT, TAB). If we filter output events,
+    those indices must be remapped to positions in the filtered list; otherwise
+    _split_into_segments slices the wrong range and input/output desync.
+    """
+    if not bar_positions:
+        return bar_positions
+
+    def out_prefix_len(out_idx: int) -> int:
+        return sum(1 for ev in full_output_events[:out_idx] if keep_event(ev))
+
+    return [(inp_i, out_prefix_len(out_i)) for inp_i, out_i in bar_positions]
 
 
 def find_split_bar_near_length(
@@ -275,6 +363,7 @@ class TabDataset:
         num_strings: int = 6,
         num_frets: int = 21,
         output_format: str = "v1",
+        time_shift_mode: str = "ticks",
     ):
         """
         Initialize dataset.
@@ -294,11 +383,12 @@ class TabDataset:
         self.token_files = token_files
         self.max_sequence_length = max_sequence_length
         self.output_format = output_format
+        self.time_shift_mode = time_shift_mode
 
         # Build vocabularies
         print("Building vocabularies...")
-        
-                # Format descriptions for clarity
+
+        # Format descriptions for clarity
         format_descriptions = {
             "v1": "NOTE_ON, TAB, NOTE_OFF, TIME_SHIFT",
             "v2": "TAB, TIME_SHIFT",
@@ -306,7 +396,7 @@ class TabDataset:
         }
         format_desc = format_descriptions.get(output_format, "unknown")
         print(f"Output format: {output_format} ({format_desc})")
-        
+
         self.max_pitch = max_pitch
         self.max_time_shift = max_time_shift
         self.num_strings = num_strings
@@ -316,6 +406,7 @@ class TabDataset:
             num_strings=num_strings,
             num_frets=num_frets,
             output_format=output_format,
+            time_shift_mode=time_shift_mode,
         )
 
         print(f"Input vocab size: {self.input_vocab.vocab_size}")
@@ -350,20 +441,43 @@ class TabDataset:
                 if self.output_format == "v2":
                     # v2: input = NOTE_ON, NOTE_OFF, TIME_SHIFT
                     #     output = TAB, TIME_SHIFT (drop NOTE_ON/NOTE_OFF from output)
+                    full_output_events = output_events
                     filtered_output_events: list[Event] = []
                     for ev in output_events:
                         if isinstance(ev, (TabEvent, TimeShiftEvent)):
                             filtered_output_events.append(ev)
                     output_events = filtered_output_events
+                    bar_positions = _remap_bar_positions_after_output_filter(
+                        bar_positions,
+                        full_output_events,
+                        lambda ev: isinstance(ev, (TabEvent, TimeShiftEvent)),
+                    )
                 elif self.output_format == "v3":
                     # v3: input = NOTE_ON, TIME_SHIFT (no NOTE_OFF in input)
                     #     output = NOTE_ON, TAB, TIME_SHIFT (drop NOTE_OFF from output)
+                    full_input_events = input_events
+                    full_output_events = output_events
                     input_events = [ev for ev in input_events if not isinstance(ev, NoteOffEvent)]
                     filtered_output_events: list[Event] = []
                     for ev in output_events:
                         if isinstance(ev, (NoteOnEvent, TabEvent, TimeShiftEvent)):
                             filtered_output_events.append(ev)
                     output_events = filtered_output_events
+                    bar_positions = [
+                        (
+                            sum(
+                                1
+                                for ev in full_input_events[:inp_i]
+                                if not isinstance(ev, NoteOffEvent)
+                            ),
+                            sum(
+                                1
+                                for ev in full_output_events[:out_i]
+                                if isinstance(ev, (NoteOnEvent, TabEvent, TimeShiftEvent))
+                            ),
+                        )
+                        for inp_i, out_i in bar_positions
+                    ]
 
                 # Convert to IDs
                 input_ids = events_to_ids(input_events, self.input_vocab)
@@ -373,22 +487,14 @@ class TabDataset:
                 segments = self._split_into_segments(
                     input_ids, output_ids, bar_positions
                 )
-                
-                # insert BOS and EOS
+
                 for inp, out in segments:
-                #     # insert BOS and EOS
                     out = [self.output_vocab.bos_id] + out + [self.output_vocab.eos_id]
-                    
-                #     # only EOS
-                #     # out = out + [self.output_vocab.eos_id]
-                    
-                #     # ensure max length
                     if len(out) > self.max_sequence_length:
-                        out = out[:self.max_sequence_length - 1] + [self.output_vocab.eos_id]
-                                    
+                        out = out[: self.max_sequence_length - 1] + [
+                            self.output_vocab.eos_id
+                        ]
                     all_segments.append((inp, out))
-                
-                # all_segments.extend(segments)
 
             except Exception as e:
                 print(f"Error processing {token_file}: {e}")
@@ -417,12 +523,6 @@ class TabDataset:
 
         if not bar_positions:
             raise ValueError("No bar positions found")
-
-            # No bars found, return whole sequence if small enough
-            if len(input_ids) <= self.max_sequence_length:
-                return [(input_ids, output_ids)]
-            else:
-                return []
 
         # Split at bar boundaries
         current_bar_idx = 0

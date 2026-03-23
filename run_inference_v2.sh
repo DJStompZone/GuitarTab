@@ -5,6 +5,7 @@
 #SBATCH --gres=gpu:1
 #SBATCH --account=ACD114010
 #SBATCH --partition=normal
+#SBATCH --time=14:00:00
 #SBATCH --output=slurm-%j-inf-v2.out
 
 echo "Running on node: $(hostname)"
@@ -19,6 +20,8 @@ conda activate MusicFinal
 #   sbatch run_inference_v2.sh outputs/xxx/best_model.pt
 CHECKPOINT_PATH="${1:-outputs/2026-03-12_15-09-fix-timeshift/best_model.pt}"
 RUN_TAG="$(date +%Y-%m-%d_%H-%M)-inference-v2"
+
+export TQDM_DISABLE=1
 
 time python inference.py \
   data=test_split \

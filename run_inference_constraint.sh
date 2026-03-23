@@ -1,11 +1,11 @@
 #!/bin/bash
-#SBATCH --job-name=inf
+#SBATCH --job-name=inf-const
 #SBATCH --nodes=1
 #SBATCH --cpus-per-task=4
 #SBATCH --gres=gpu:1
 #SBATCH --account=ACD114010
 #SBATCH --partition=gp1d
-#SBATCH --output=logs_inference/slurm-%j-inf-v1.out
+#SBATCH --output=logs_inference/slurm-%j-inf-v1-constrained.out
 
 echo "Running on node: $(hostname)"
 
@@ -16,5 +16,4 @@ conda activate MusicFinal
 
 time python inference.py \
     data=test_split \
-    
-    # constrained_decoding=true
+    constrained_decoding=true

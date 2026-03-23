@@ -7,7 +7,7 @@ seed: 42
 exp: ${now:%Y-%m-%d_%H-%M}
 experiment_name: ${exp}-inference
 output_dir: "outputs/${experiment_name}"
-checkpoint_path: outputs/2026-03-12_15-09-fix-timeshift/best_model.pt
+checkpoint_path: outputs/2026-03-19_17-38-v1/checkpoint_epoch_100.pt
 
 # Constrained decoding: restrict TAB tokens to pitches from input (NOTE_ON). Set true to enable.
 constrained_decoding: false
