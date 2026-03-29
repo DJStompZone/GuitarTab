@@ -11,7 +11,7 @@ import random
 import numpy as np
 import torch
 import torch.nn as nn
-from torch.utils.data import DataLoader, random_split
+from torch.utils.data import DataLoader, ConcatDataset, random_split
 from tqdm import tqdm
 import hydra
 from transformers.modeling_outputs import Seq2SeqLMOutput
@@ -49,12 +49,18 @@ def create_dataloaders(cfg: DictConfig) -> tuple[DataLoader, DataLoader, DataLoa
         Tuple of (train_loader, val_loader, test_loader, train_dataset)
     """
     selected_file = cfg.data.selected_files_json
+    # print("selected_files_json =", cfg.data.selected_files_json)
+    # breakpoint()
 
     # Check if using pre-split files
-    if selected_file and any(split in selected_file for split in ['train_files.json', 'val_files.json', 'test_files.json']):
+    # Original: if selected_file and any(split in selected_file for split in ['train_files.json', 'val_files.json', 'test_files.json']):
+    # Modify 2026-03-17: match any train_files* (e.g. train_files_no_aug.json) not just train_files.json
+    if selected_file and any(split in selected_file for split in ['train_files', 'val_files', 'test_files']):
         # Using pre-split files - load each split separately
         split_dir = Path(selected_file).parent
-        train_file = str(split_dir / 'train_files.json')
+        # Original: train_file = str(split_dir / 'train_files.json')
+        # Modify 2026-03-17: use the configured file directly (supports train_files_no_aug.json etc.)
+        train_file = selected_file
         val_file = str(split_dir / 'val_files.json')
         test_file = str(split_dir / 'test_files.json')
 
@@ -62,6 +68,7 @@ def create_dataloaders(cfg: DictConfig) -> tuple[DataLoader, DataLoader, DataLoa
         print(f"  Train: {train_file}")
         print(f"  Val:   {val_file}")
         print(f"  Test:  {test_file}")
+        # breakpoint()
 
         # Create three separate datasets (NO random splitting!)
         train_dataset = create_dataset(
@@ -103,7 +110,7 @@ def create_dataloaders(cfg: DictConfig) -> tuple[DataLoader, DataLoader, DataLoa
         print(f"Dataset sizes: train={len(train_dataset)}, val={len(val_dataset)}, test={len(test_dataset)}")
 
     else:
-        # Fallback: old behavior for debug mode
+        # Fallback: ratio-based split (used when selected_files_json is a filter list, not pre-split)
         dataset = create_dataset(
             data_dir=cfg.data.data_dir,
             token_pattern=cfg.data.token_pattern,
@@ -116,8 +123,9 @@ def create_dataloaders(cfg: DictConfig) -> tuple[DataLoader, DataLoader, DataLoa
             max_files=cfg.data.max_files
         )
 
-        # Split at segment level (for debug only)
         total_size = len(dataset)
+        # Modify 2026-03-17: removed breakpoint() that was blocking combined training
+        # Original: breakpoint()
         train_size = int(total_size * cfg.data.train_ratio)
         val_size = int(total_size * cfg.data.val_ratio)
         test_size = total_size - train_size - val_size
@@ -130,40 +138,105 @@ def create_dataloaders(cfg: DictConfig) -> tuple[DataLoader, DataLoader, DataLoa
 
         print(f"Dataset split (segment-level): train={len(train_dataset)}, val={len(val_dataset)}, test={len(test_dataset)}")
 
+    # Modify 2026-03-17: moved secondary_sources block outside the if/else so it runs
+    # for BOTH ratio-split (combined) and pre-split (leduc/dadagp) modes.
+    # Original: secondary_sources block was only inside the if-branch (pre-split mode).
+    # Add 2026-03-17: concatenate secondary sources into train + val datasets
+    secondary_sources = cfg.data.get("secondary_sources", None) or []
+    if secondary_sources:
+        extra_trains, extra_vals = [], []
+        for src_cfg in secondary_sources:
+            extra_train = create_dataset(
+                data_dir=src_cfg.data_dir,
+                token_pattern=src_cfg.token_pattern,
+                selected_files_json=src_cfg.train_files_json,
+                max_sequence_length=cfg.data.max_sequence_length,
+                max_pitch=cfg.data.max_pitch,
+                max_time_shift=cfg.data.max_time_shift,
+                num_strings=cfg.data.num_strings,
+                num_frets=cfg.data.num_frets,
+                max_files=None,
+            )
+            extra_val = create_dataset(
+                data_dir=src_cfg.data_dir,
+                token_pattern=src_cfg.token_pattern,
+                selected_files_json=src_cfg.val_files_json,
+                max_sequence_length=cfg.data.max_sequence_length,
+                max_pitch=cfg.data.max_pitch,
+                max_time_shift=cfg.data.max_time_shift,
+                num_strings=cfg.data.num_strings,
+                num_frets=cfg.data.num_frets,
+                max_files=None,
+            )
+            extra_trains.append(extra_train)
+            extra_vals.append(extra_val)
+            print(f"  + {src_cfg.data_dir}: train={len(extra_train)}, val={len(extra_val)}")
+
+        train_dataset = ConcatDataset([train_dataset] + extra_trains)
+        val_dataset   = ConcatDataset([val_dataset]   + extra_vals)
+        print(f"Combined dataset sizes: train={len(train_dataset)}, val={len(val_dataset)}, test={len(test_dataset)}")
+
+    # Modify 2026-03-17: resolve the primary TabDataset for collate_fn / vocab access
+    # (needed when train_dataset / val_dataset is now a ConcatDataset)
+    # Original logic handled only TabDataset and Subset (random_split); now also ConcatDataset.
+    def _primary(ds):
+        """Return the first underlying TabDataset regardless of wrapper type."""
+        if isinstance(ds, TabDataset):
+            return ds
+        if isinstance(ds, ConcatDataset):
+            return _primary(ds.datasets[0])
+        # Subset from random_split
+        return ds.dataset
+
+    primary_train = _primary(train_dataset)
+    primary_val   = _primary(val_dataset)
+    primary_test  = _primary(test_dataset)
+
     # Create dataloaders
+    # Modify 2026-03-17: pass primary_dataset so ConcatDataset loaders use correct collate_fn
+    # Original:
+    # train_loader = create_dataloader(train_dataset if isinstance(...) else train_dataset.dataset, ...)
+    # val_loader   = create_dataloader(val_dataset   if isinstance(...) else val_dataset.dataset,   ...)
+    # test_loader  = create_dataloader(test_dataset  if isinstance(...) else test_dataset.dataset,  ...)
     train_loader = create_dataloader(
-        train_dataset if isinstance(train_dataset, TabDataset) else train_dataset.dataset,
+        train_dataset,
         batch_size=cfg.data.batch_size,
         shuffle=True,
         num_workers=cfg.data.num_workers,
-        pin_memory=cfg.data.pin_memory
+        pin_memory=cfg.data.pin_memory,
+        primary_dataset=primary_train,
     )
 
     val_loader = create_dataloader(
-        val_dataset if isinstance(val_dataset, TabDataset) else val_dataset.dataset,
+        val_dataset,
         batch_size=cfg.training.eval_batch_size,
         shuffle=False,
         num_workers=cfg.data.num_workers,
-        pin_memory=cfg.data.pin_memory
+        pin_memory=cfg.data.pin_memory,
+        primary_dataset=primary_val,
     )
 
     test_loader = create_dataloader(
-        test_dataset if isinstance(test_dataset, TabDataset) else test_dataset.dataset,
+        test_dataset,
         batch_size=cfg.training.eval_batch_size,
         shuffle=False,
         num_workers=cfg.data.num_workers,
-        pin_memory=cfg.data.pin_memory
+        pin_memory=cfg.data.pin_memory,
+        primary_dataset=primary_test,
     )
 
     # Return train_dataset for vocabulary access
-    return_dataset = train_dataset if isinstance(train_dataset, TabDataset) else train_dataset.dataset
+    # Modify 2026-03-17: use primary_train (always a TabDataset) for vocab
+    # Original: return_dataset = train_dataset if isinstance(train_dataset, TabDataset) else train_dataset.dataset
+    return_dataset = primary_train
     return train_loader, val_loader, test_loader, return_dataset
 
 
 
 
+# Modify 2026-03-15: also create and return LR scheduler
 def create_optimizer(model: nn.Module, cfg: DictConfig):
-    """Create optimizer based on config."""
+    """Create optimizer and scheduler based on config."""
     if cfg.training.optimizer.name == "adafactor":
         from transformers import Adafactor
 
@@ -184,13 +257,28 @@ def create_optimizer(model: nn.Module, cfg: DictConfig):
     else:
         raise ValueError(f"Unknown optimizer: {cfg.training.optimizer.name}")
 
+    # Original:
     return optimizer
 
+    # Add: create LR scheduler
+    # from transformers import get_linear_schedule_with_warmup
+    # scheduler = get_linear_schedule_with_warmup(
+    #     optimizer,
+    #     num_warmup_steps=cfg.training.scheduler.num_warmup_steps,
+    #     num_training_steps=cfg.training.scheduler.num_training_steps,
+    # )
+    # print(f"Created LR scheduler: linear warmup over {cfg.training.scheduler.num_warmup_steps} steps, "
+    #       f"total {cfg.training.scheduler.num_training_steps} steps")
 
+    # return optimizer, scheduler
+
+
+# Modify 2026-03-15: added scheduler parameter
 def train_epoch(
     model: FrettingTransformer,
     train_loader: DataLoader,
     optimizer,
+    # scheduler,  # Add: LR scheduler
     device: str,
     epoch: int,
     cfg: DictConfig,
@@ -252,6 +340,7 @@ def train_epoch(
 
         # Optimizer step
         optimizer.step()
+        # scheduler.step()  # Add 2026-03-15: step LR scheduler after each optimizer update
         optimizer.zero_grad()
 
         # Update metrics
@@ -352,11 +441,15 @@ def main(cfg: DictConfig):
     model = model.to(device)
 
     # Create optimizer
+    # Original: optimizer = create_optimizer(model, cfg)
     optimizer = create_optimizer(model, cfg)
+    # Modify 2026-03-15: unpack (optimizer, scheduler) tuple
+    # optimizer, scheduler = create_optimizer(model, cfg)
 
     # Training loop
     print("\nStarting training...")
     best_val_loss = float("inf")
+    best_tab_accuracy = 0.0
 
     for epoch in range(1, cfg.training.num_epochs + 1):
         print(f"\n{'=' * 80}")
@@ -364,7 +457,10 @@ def main(cfg: DictConfig):
         print(f"{'=' * 80}")
 
         # Train
+        # Original: train_loss = train_epoch(model, train_loader, optimizer, device, epoch, cfg)
         train_loss = train_epoch(model, train_loader, optimizer, device, epoch, cfg)
+        #  Modify 2026-03-15: pass scheduler to train_epoch
+        # train_loss = train_epoch(model, train_loader, optimizer, scheduler, device, epoch, cfg)
         print(f"Train loss: {train_loss:.4f}")
 
         # Evaluate (teacher forcing loss)
@@ -373,6 +469,9 @@ def main(cfg: DictConfig):
 
         # Log epoch metrics
         logger.log_epoch(epoch=epoch, train_loss=train_loss, val_loss=val_loss)
+        
+        # Initialize current_tab_accuracy for this epoch
+        current_tab_accuracy = None
 
         # Autoregressive evaluation (real accuracy)
         if cfg.training.get('ar_eval_enabled', False) and cfg.training.get('ar_eval_frequency', 0) > 0:
@@ -385,9 +484,13 @@ def main(cfg: DictConfig):
                     device=device,
                     max_length=cfg.training.get('ar_eval_max_length', 1024),
                     num_beams=cfg.training.get('ar_eval_num_beams', 1),
-                    max_batches=cfg.training.get('ar_eval_max_batches', None)
+                    # max_batches=cfg.training.get('ar_eval_max_batches', None) # use first N batches for quick evaluation during training
+                    max_batches=None  # Use all batches for AR eval during training
+                    
                 )
                 print(f"AR Metrics: {ar_metrics}")
+                
+                current_tab_accuracy = ar_metrics.tab_accuracy
 
                 # Save generated samples
                 samples_file = output_dir / f"generated_samples_epoch_{epoch}.json"
@@ -410,7 +513,7 @@ def main(cfg: DictConfig):
                     total_notes=ar_metrics.total_notes
                 )
 
-        # Save best checkpoint
+        # Save best checkpoint based on validation loss
         if val_loss < best_val_loss:
             best_val_loss = val_loss
             checkpoint_path = output_dir / "best_model.pt"
@@ -426,6 +529,25 @@ def main(cfg: DictConfig):
                 checkpoint_path,
             )
             print(f"Saved best model to {checkpoint_path}")
+        
+        # Save best checkpoint based on AR tab accuracy
+        # if current_tab_accuracy is not None and current_tab_accuracy > best_tab_accuracy:
+        #     best_tab_accuracy = current_tab_accuracy
+        #     checkpoint_path = output_dir / "best_model.pt"
+        #     torch.save(
+        #         {
+        #             "epoch": epoch,
+        #             "model_state_dict": model.state_dict(),
+        #             "optimizer_state_dict": optimizer.state_dict(),
+        #             "train_loss": train_loss,
+        #             "val_loss": val_loss,
+        #             "best_tab_accuracy": best_tab_accuracy,
+        #             "config": OmegaConf.to_container(cfg),
+        #         },
+        #         checkpoint_path,
+        #     )
+        #     print(f"Saved best model to {checkpoint_path}")
+        #     print(f"New best tab accuracy: {best_tab_accuracy:.4%}")
 
         # Save checkpoint every N epochs
         checkpoint_every_n = cfg.training.get('checkpoint_every_n_epochs', 0)
@@ -448,6 +570,16 @@ def main(cfg: DictConfig):
     print("\n" + "=" * 80)
     print("Final evaluation on test set")
     print("=" * 80)
+    
+    # Load best model checkpoint for final evaluation
+    best_checkpoint_path = output_dir / "best_model.pt"
+    checkpoint = torch.load(best_checkpoint_path, map_location=device)
+    model.load_state_dict(checkpoint["model_state_dict"])
+    model.to(device)
+    model.eval()
+
+    print(f"Loaded best model from epoch {checkpoint['epoch']} for final test evaluation")
+    
     test_loss = evaluate(model, test_loader, device)
     print(f"Test loss: {test_loss:.4f}")
 
@@ -464,8 +596,8 @@ def main(cfg: DictConfig):
             device=device,
             max_length=cfg.training.get('ar_eval_max_length', 1024),
             num_beams=cfg.training.get('ar_eval_num_beams', 1),
-            # max_batches=None  # Use all batches for final evaluation
-            max_batches=cfg.training.get('ar_eval_max_batches', None)
+            max_batches=None  # Use all batches for final evaluation
+            # max_batches=cfg.training.get('ar_eval_max_batches', None)
         )
         print(f"\nTest Set AR Metrics:")
         print(f"  Token Accuracy:  {test_ar_metrics.token_accuracy:.2%}")

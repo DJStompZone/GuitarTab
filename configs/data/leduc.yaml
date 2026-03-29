@@ -1,0 +1,34 @@
+# François Leduc Dataset configuration
+# Run scripts/prepare_leduc_dataset.py first to generate .tokens.txt files.
+
+name: "leduc"
+
+# Data paths
+data_dir: "10984521/FrancoisLeducDatasetPublication/FrancoisLeducDatasetPublication"
+token_pattern: "*.tokens.txt"  # all files are in the same directory (no subdirs)
+
+# Point to train JSON — train.py auto-detects val_files.json and test_files.json
+# in the same directory (55 songs, no pitch transpositions)
+# selected_files_json: "10984521/FrancoisLeducDatasetPublication/FrancoisLeducDatasetPublication/train_files.json"
+# use aug split for training (55 songs, no pitch transpositions)
+selected_files_json: "10984521/FrancoisLeducDatasetPublication/FrancoisLeducDatasetPublication/train_files_aug.json"
+
+# Dataset parameters (same as DadaGP for vocabulary compatibility)
+max_sequence_length: 512
+max_pitch: 127
+max_time_shift: 500
+num_strings: 6
+num_frets: 21  # frets 0-20 (matches MAX_FRET=20 in prepare_leduc_dataset.py)
+
+# Train/val/test ratios (not used since we use pre-split JSON files)
+train_ratio: 0.8
+val_ratio: 0.1
+test_ratio: 0.1
+
+# DataLoader settings
+batch_size: 8   # smaller dataset → smaller batch is fine
+num_workers: 4
+pin_memory: true
+
+# Limit number of files (set to a small number for quick debugging)
+max_files: null
