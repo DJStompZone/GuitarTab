@@ -57,6 +57,12 @@ class EffectToken(DadaGPToken):
     effect_type: str = ""  # nfx or bfx
     effect_name: str = ""  # tie, bend, etc.
 
+# NEW add TechniqueToken for playing techniques
+# @dataclass(frozen=True)
+# class TechniqueToken(DadaGPToken):
+#     type: Literal["technique"] = "technique"
+#     effect_type: str = ""   # nfx or bfx
+#     effect_name: str = ""   # tie, let_ring, bend, etc.
 
 # ============================================================================
 # Our Output Event Types (same as midi_utils.py)
@@ -92,6 +98,12 @@ class TabEvent(Event):
     string: int = 0
     fret: int = 0
 
+# NEW add
+# @dataclass(frozen=True)
+# class TechniqueEvent(Event):
+#     type: Literal["TECHNIQUE"] = "TECHNIQUE"
+#     effect_type: str = ""
+#     effect_name: str = ""
 
 # ============================================================================
 # Intermediate Data Structures

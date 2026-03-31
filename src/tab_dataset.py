@@ -426,6 +426,7 @@ class TabDataset:
             List of (input_ids, output_ids) tuples
         """
         all_segments: list[tuple[list[int], list[int]]] = []
+        self.segment_sources: list[str] = []  # maps segment index → source file path
 
         for token_file in tqdm(self.token_files, desc="Processing files"):
             try:
@@ -495,6 +496,9 @@ class TabDataset:
                             self.output_vocab.eos_id
                         ]
                     all_segments.append((inp, out))
+                    self.segment_sources.append(token_file)
+
+                # all_segments.extend(segments)
 
             except Exception as e:
                 print(f"Error processing {token_file}: {e}")

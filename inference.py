@@ -7,6 +7,8 @@ Runs autoregressive generation and computes accuracy metrics.
 import os
 import torch
 import hydra
+import random
+import numpy as np
 from omegaconf import DictConfig
 from torch.utils.data import DataLoader
 from functools import partial
@@ -16,6 +18,14 @@ from src.model import FrettingTransformer
 from src.metrics import generate_and_compute_accuracy
 from src.dataloader import create_dataset, create_dataloader
 from src.visualization import *
+
+def set_seed(seed: int):
+    """Set random seed for reproducibility."""
+    random.seed(seed)
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+    if torch.cuda.is_available():
+        torch.cuda.manual_seed_all(seed)
 
 def load_checkpoint(checkpoint_path: str, model, device: str):
     """Load model from checkpoint."""
@@ -99,10 +109,44 @@ def main(cfg: DictConfig):
     print("=" * 80)
     print("Fretting-Transformer Inference")
     print("=" * 80)
+    
+    # Set seed for reproducibility
+    set_seed(cfg.seed)
 
     device = 'cuda' if torch.cuda.is_available() else 'cpu'
     print(f"Using device: {device}\n")
+    
+    # Modify 2026-03-17: auto-detect the train JSON for vocab building so that
+    # inference works with any dataset config (e.g. data=leduc, data=dadagp).
+    # Original: hardcoded selected_files_json="data_splits/train_files.json"
+    # which fails when data=leduc because the Leduc data_dir has no such file.
+    _vocab_json = "data_splits/train_files.json"  # Original default (DadaGP legacy path)
+    # Modify 2026-03-20: generalize sibling detection — look for train_files.json in the
+    # parent directory of ANY configured selected_files_json, not just test_files.json.
+    # Original:
+    # if _test_json and "test_files" in str(_test_json):
+    #     _candidate = str(_test_json).replace("test_files.json", "train_files.json")
+    #     if os.path.exists(_candidate):
+    #         _vocab_json = _candidate
+    _test_json = cfg.data.get("selected_files_json", None)
+    if _test_json:
+        _candidate = str(Path(str(_test_json)).parent / "train_files.json")
+        if os.path.exists(_candidate):
+            _vocab_json = _candidate
 
+    # Build train set dataset for vocab
+    train_dataset = create_dataset(
+        data_dir=cfg.data.data_dir,
+        token_pattern=cfg.data.token_pattern,
+        selected_files_json=_vocab_json,
+        max_sequence_length=cfg.data.max_sequence_length,
+        max_pitch=cfg.data.max_pitch,
+        max_time_shift=cfg.data.max_time_shift,
+        num_strings=cfg.data.num_strings,
+        num_frets=cfg.data.num_frets,
+        max_files=cfg.data.max_files
+    )  
+    
     # Use test split by default for inference
     if cfg.data.selected_files_json is None:
         print("No selected_files_json specified, using test split by default...")
@@ -119,8 +163,9 @@ def main(cfg: DictConfig):
         max_time_shift=cfg.data.max_time_shift,
         num_strings=cfg.data.num_strings,
         num_frets=cfg.data.num_frets,
-        output_format=cfg.data.get('output_format', 'v1'),
-        max_files=cfg.data.get('max_files', None)
+        # output_format=cfg.data.get('output_format', 'v1'),
+        # max_files=cfg.data.get('max_files', None)
+        max_files=None
     )
 
     # Create dataloader
@@ -133,8 +178,13 @@ def main(cfg: DictConfig):
     )
 
     print(f"Dataset: {len(dataset)} segments\n")
+    # breakpoint()
 
-    input_vocab_size, output_vocab_size = dataset.get_vocab_sizes()
+    # original
+    # input_vocab_size, output_vocab_size = dataset.get_vocab_sizes()
+    
+    # modify use train dataset vocab for inference to ensure consistency with training
+    input_vocab_size, output_vocab_size = train_dataset.get_vocab_sizes()
     
     # debug
     # print(f"input_vocab_size = {input_vocab_size}")
@@ -159,6 +209,7 @@ def main(cfg: DictConfig):
         raise FileNotFoundError(f"Checkpoint not found: {checkpoint_path}")
 
     model = load_checkpoint(checkpoint_path, model, device)
+    model.eval()
 
     # Run inference
     print("\n" + "=" * 80)
@@ -172,12 +223,14 @@ def main(cfg: DictConfig):
     metrics, (input_ids, targets, predictions) = generate_and_compute_accuracy(
         model=model,
         dataloader=dataloader,
-        output_vocab=dataset.output_vocab,
+        # output_vocab=dataset.output_vocab,      # original
+        output_vocab=train_dataset.output_vocab,  # Use train vocab for decoding
         input_vocab=dataset.input_vocab,
         device=device,
         max_length=cfg.training.get('ar_eval_max_length', 1024),
         num_beams=cfg.training.get('ar_eval_num_beams', 1),
-        max_batches=cfg.get('max_eval_batches', None),  # None = all batches
+        max_batches=None
+        # max_batches=cfg.training.get('ar_eval_max_batches', None),  # None = all batches
         use_constrained_decoding=use_constrained,
         num_frets=cfg.data.num_frets,
     )
@@ -196,6 +249,10 @@ def main(cfg: DictConfig):
     torch.save(targets, targets_file)
     torch.save(predictions, predictions_file)
 
+    import json
+    with open(cfg.output_dir / "segment_sources.json", "w") as f:
+        json.dump(dataset.segment_sources, f)
+
 
     print(f"\nResults:")
     print(f"  Token Accuracy:  {metrics.token_accuracy:.2%}")
@@ -211,20 +268,20 @@ def main(cfg: DictConfig):
     # Show ground truth vs predicted tablature for a few samples
     # ======================================================================
 
-    print("\n" + "=" * 80)
-    print("Visualizing Predicted vs Ground Truth Tablature")
-    print("=" * 80)
+    # print("\n" + "=" * 80)
+    # print("Visualizing Predicted vs Ground Truth Tablature")
+    # print("=" * 80)
 
-    num_samples_to_show = min(3, len(predictions))  # Change if needed
+    # num_samples_to_show = min(3, len(predictions))  # Change if needed
 
-    for idx in range(num_samples_to_show):
-        print(f"\n--- SAMPLE {idx} ---")
-        visualize_tab_sample(
-            gt_ids=targets[idx],
-            pred_ids=predictions[idx],
-            output_vocab=dataset.output_vocab,
-            max_bars=2
-        )
+    # for idx in range(num_samples_to_show):
+    #     print(f"\n--- SAMPLE {idx} ---")
+    #     visualize_tab_sample(
+    #         gt_ids=targets[idx],
+    #         pred_ids=predictions[idx],
+    #         output_vocab=dataset.output_vocab,
+    #         max_bars=2
+    #     )
 
 
     print("\n" + "=" * 80)

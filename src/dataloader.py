@@ -6,10 +6,10 @@ import json
 from glob import glob
 from pathlib import Path
 from functools import partial
-from typing import Optional
+from typing import Optional, Union
 
 import torch
-from torch.utils.data import DataLoader
+from torch.utils.data import DataLoader, Dataset
 
 from src.tab_dataset import TabDataset, collate_fn
 
@@ -89,26 +89,36 @@ def create_dataset(
 
 
 def create_dataloader(
-    dataset: TabDataset,
+    # Modify 2026-03-17: accept any Dataset (e.g. ConcatDataset) in addition to TabDataset
+    # Original: dataset: TabDataset,
+    dataset: Union[TabDataset, Dataset],
     batch_size: int = 32,
     shuffle: bool = True,
     num_workers: int = 0,
-    pin_memory: bool = False
+    pin_memory: bool = False,
+    # Add 2026-03-17: when dataset is ConcatDataset, supply the primary TabDataset
+    # so we can retrieve pad IDs for the collate_fn.
+    primary_dataset: Optional[TabDataset] = None,
 ) -> DataLoader:
     """
-    Create a DataLoader from a TabDataset.
+    Create a DataLoader from a TabDataset (or ConcatDataset).
 
     Args:
-        dataset: TabDataset instance
+        dataset: TabDataset or ConcatDataset instance
         batch_size: Batch size
         shuffle: Whether to shuffle data
         num_workers: Number of worker processes
         pin_memory: Whether to pin memory (set True for GPU)
+        primary_dataset: When dataset is a ConcatDataset, pass the primary
+            TabDataset here so pad IDs can be retrieved for the collate_fn.
 
     Returns:
         DataLoader instance
     """
-    input_pad_id, output_pad_id = dataset.get_pad_ids()
+    # Add 2026-03-17: use primary_dataset for pad IDs when dataset is ConcatDataset
+    # Original: input_pad_id, output_pad_id = dataset.get_pad_ids()
+    src = primary_dataset if primary_dataset is not None else dataset
+    input_pad_id, output_pad_id = src.get_pad_ids()
     collate_fn_partial = partial(
         collate_fn,
         input_pad_id=input_pad_id,

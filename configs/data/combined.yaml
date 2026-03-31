@@ -1,0 +1,42 @@
+# Add 2026-03-17: Combined DadaGP + Leduc training config
+# Train: ConcatDataset(dadagp_train + leduc_train)
+# Val:   ConcatDataset(dadagp_val   + leduc_val)   — used for best model selection
+# Test:  run inference.py separately per dataset
+
+name: "combined"
+
+# Primary dataset: DadaGP (pre-split JSON files, same as data=dadagp)
+data_dir: "DadaGP-v1.1"
+token_pattern: "**/*.tokens.txt"
+# Modify 2026-03-20: use pre-split JSON so DadaGP test set matches data=dadagp exactly.
+# Original: selected_files_json: "selected_files.json"  # ratio-based random split
+selected_files_json: "data_splits/train_files.json"  # 4148 files; val/test auto-detected as siblings
+
+# Dataset parameters
+max_sequence_length: 512
+max_pitch: 127
+max_time_shift: 500
+num_strings: 6
+num_frets: 21
+output_format: "v1"
+
+# Train/val/test split ratios (not used — pre-split JSON files take precedence)
+train_ratio: 0.8
+val_ratio: 0.1
+test_ratio: 0.1
+
+# DataLoader settings
+batch_size: 32
+eval_batch_size: 64
+num_workers: 4
+pin_memory: true
+max_files: null
+
+# Add 2026-03-17: secondary datasets concatenated into train + val loaders.
+# Each entry needs: data_dir, token_pattern, train_files_json, val_files_json.
+# test split is NOT included here — run inference.py per-dataset for test eval.
+secondary_sources:
+  - data_dir: "10984521/FrancoisLeducDatasetPublication/FrancoisLeducDatasetPublication"
+    token_pattern: "*.tokens.txt"
+    train_files_json: "10984521/FrancoisLeducDatasetPublication/FrancoisLeducDatasetPublication/train_files.json"
+    val_files_json: "10984521/FrancoisLeducDatasetPublication/FrancoisLeducDatasetPublication/val_files.json"
