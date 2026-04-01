@@ -5,7 +5,8 @@ name: "dadagp"
 # Data paths
 data_dir: "DadaGP-v1.1"
 token_pattern: "**/*.tokens.txt"
-selected_files_json: null  # null = use all files, or path to JSON file with .gp file names
+# selected_files_json: null  # null = use all files, or path to JSON file with .gp file names
+selected_files_json: "data_splits/train_files.json"  # 4148 files; val/test auto-detected as siblings
 
 # Dataset parameters
 max_sequence_length: 512

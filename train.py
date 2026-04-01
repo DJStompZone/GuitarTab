@@ -601,8 +601,7 @@ def main(cfg: DictConfig):
             device=device,
             max_length=cfg.training.get('ar_eval_max_length', 1024),
             num_beams=cfg.training.get('ar_eval_num_beams', 1),
-            max_batches=None  # Use all batches for final evaluation
-            # max_batches=cfg.training.get('ar_eval_max_batches', None),
+            max_batches=None,  # Use all batches for final evaluation
             input_vocab=dataset.input_vocab,
         )
         print(f"\nTest Set AR Metrics:")

@@ -32,6 +32,7 @@ from src.tab_dataset import build_vocabulary, collate_fn, events_to_ids
 from src.dadagp_parser import parse_dadagp_file, dadagp_to_events
 from src.constrained_decoding import (
     TablatureLogitsProcessor,
+    build_output_schedule_from_input,
     extract_pitches_from_input_ids,
     STANDARD_TUNING,
 )
@@ -205,13 +206,26 @@ def model_generate_constrained(
     device: str,
     max_length: int = 1024,
     num_frets: int = 25,
+    input_vocab=None,
+    strict_input_schedule: bool = False,
 ) -> List[int]:
     """使用 TablatureLogitsProcessor 做 constrained decoding，並逐步印出每步 constraint 狀態。"""
+    schedule = None
+    if strict_input_schedule:
+        if input_vocab is None:
+            raise ValueError("strict_input_schedule requires input_vocab")
+        schedule = build_output_schedule_from_input(
+            torch.tensor(input_ids, dtype=torch.long),
+            input_vocab,
+            output_vocab,
+        )
     processor = TablatureLogitsProcessor(
         output_vocab=output_vocab,
         input_pitches=input_pitches,
         num_frets=num_frets,
         device=device,
+        strict_input_schedule=strict_input_schedule,
+        schedule=schedule,
     )
     processor.reset_state()
     enc_inp = torch.tensor([input_ids], dtype=torch.long, device=device)
@@ -233,6 +247,8 @@ def model_generate_constrained(
         print("\n【逐步 Constraint 狀態（模型 constrained decoding）】")
         print(f"  輸入音高序列長度: {len(input_pitches)}")
         print(f"  前 30 個輸入音高: {input_pitches[:30]}{' ...' if len(input_pitches) > 30 else ''}")
+        if strict_input_schedule:
+            print(f"  strict_input_schedule: True（時程長度 {len(schedule) if schedule else 0}）")
         print()
 
         for step in range(1, max_length + 1):
@@ -258,6 +274,11 @@ def model_generate_constrained(
                 f"last_type={processor.last_token_type}, "
                 f"active_notes={processor.active_notes[:8]}{' ...' if len(processor.active_notes) > 8 else ''}, "
                 f"pitch_idx={processor.pitch_idx}"
+                + (
+                    f", schedule_idx={processor.schedule_idx}"
+                    if strict_input_schedule
+                    else ""
+                )
             )
             print(f"  本步允許 token 數量: {len(valid_names)}")
             if len(valid_names) <= 25:
@@ -297,6 +318,9 @@ def demo_single_sequence(
     title="Constrained Decoding 演示",
     ground_truth_output_ids=None,
     num_frets: int = 25,
+    input_vocab=None,
+    encoder_input_ids: Optional[List[int]] = None,
+    strict_input_schedule: bool = False,
 ):
     """
     演示單一序列的 constrained decoding 步驟。
@@ -308,11 +332,23 @@ def demo_single_sequence(
         input_pitches = [64, 67]
     device = "cpu"
 
+    schedule = None
+    if strict_input_schedule:
+        if input_vocab is None or encoder_input_ids is None:
+            raise ValueError("strict_input_schedule 需要 input_vocab 與 encoder_input_ids")
+        schedule = build_output_schedule_from_input(
+            torch.tensor(encoder_input_ids, dtype=torch.long),
+            input_vocab,
+            output_vocab,
+        )
+
     processor = TablatureLogitsProcessor(
         output_vocab=output_vocab,
         input_pitches=input_pitches,
         num_frets=num_frets,
         device=device,
+        strict_input_schedule=strict_input_schedule,
+        schedule=schedule,
     )
 
     seq_ids = [output_vocab.bos_id]
@@ -590,6 +626,7 @@ def print_metrics_via_generate_and_compute_accuracy(
     num_frets: int = 25,
     max_length: int = 1024,
     temperature: float = 1.0,
+    strict_input_schedule: bool = False,
 ):
     """
     與 train.py 相同：呼叫 src.metrics.generate_and_compute_accuracy（含 Difficulty）。
@@ -614,6 +651,7 @@ def print_metrics_via_generate_and_compute_accuracy(
         temperature=temperature,
         use_constrained_decoding=True,
         num_frets=num_frets,
+        strict_input_schedule=strict_input_schedule,
     )
     print("\n  【Constrained Decoding】")
     print(f"    {ar_constrained}")
@@ -704,6 +742,11 @@ if __name__ == "__main__":
         default=None,
         help="選填：模型 checkpoint 路徑（.pt）。若提供，之後可接真實模型做 inference；目前 demo 仍以隨機取樣模擬 unconstrained。",
     )
+    parser.add_argument(
+        "--strict-input-schedule",
+        action="store_true",
+        help="與 inference 的 strict_input_schedule 相同：NOTE_OFF/TIME_SHIFT 依 encoder 時程鎖定。",
+    )
     args = parser.parse_args()
 
     device = "cuda" if torch.cuda.is_available() else "cpu"
@@ -760,8 +803,14 @@ if __name__ == "__main__":
                 print("Constrained Decoding 演示（歌曲第 {} 小節起，共 {} 小節，使用模型）".format(start_bar, bars_to_use))
             print("=" * 70)
             constrained_ids = model_generate_constrained(
-                model, seg_input, output_vocab, input_pitches, device,
+                model,
+                seg_input,
+                output_vocab,
+                input_pitches,
+                device,
                 num_frets=data_cfg.get("num_frets", 25),
+                input_vocab=input_vocab,
+                strict_input_schedule=args.strict_input_schedule,
             )
         else:
             output_vocab, input_pitches, constrained_ids = demo_single_sequence(
@@ -793,8 +842,14 @@ if __name__ == "__main__":
             print("Constrained Decoding 演示（內建範例，使用模型）")
             print("=" * 70)
             constrained_ids = model_generate_constrained(
-                model, encoder_input, output_vocab, input_pitches, device,
+                model,
+                encoder_input,
+                output_vocab,
+                input_pitches,
+                device,
                 num_frets=data_cfg.get("num_frets", 25),
+                input_vocab=input_vocab,
+                strict_input_schedule=args.strict_input_schedule,
             )
         else:
             output_vocab, input_pitches, constrained_ids = demo_single_sequence(
@@ -847,6 +902,7 @@ if __name__ == "__main__":
                 device=device,
                 num_frets=data_cfg.get("num_frets", 25),
                 max_length=1024,
+                strict_input_schedule=args.strict_input_schedule,
             )
         else:
             print_token_accuracy(

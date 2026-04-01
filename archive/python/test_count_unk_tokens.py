@@ -175,6 +175,7 @@ def main():
     selected_files_json = (
         Path(selected_files_json_str) if selected_files_json_str is not None else None
     )
+    print("selected_files_json =", selected_files_json)
 
     # Build vocabularies exactly as in training/demo
     input_vocab, output_vocab = build_vocabulary(

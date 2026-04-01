@@ -18,7 +18,7 @@ max_sequence_length: 512
 max_pitch: 127
 max_time_shift: 500
 num_strings: 6
-num_frets: 21  # frets 0-20 (matches MAX_FRET=20 in prepare_leduc_dataset.py)
+num_frets: 25  # frets 0-20 (matches MAX_FRET=20 in prepare_leduc_dataset.py)
 
 # Train/val/test ratios (not used since we use pre-split JSON files)
 train_ratio: 0.8

@@ -115,7 +115,7 @@ def main(cfg: DictConfig):
 
     device = 'cuda' if torch.cuda.is_available() else 'cpu'
     print(f"Using device: {device}\n")
-    
+
     # Modify 2026-03-17: auto-detect the train JSON for vocab building so that
     # inference works with any dataset config (e.g. data=leduc, data=dadagp).
     # Original: hardcoded selected_files_json="data_splits/train_files.json"
@@ -144,6 +144,7 @@ def main(cfg: DictConfig):
         max_time_shift=cfg.data.max_time_shift,
         num_strings=cfg.data.num_strings,
         num_frets=cfg.data.num_frets,
+        output_format=cfg.data.get('output_format', 'v1'),
         max_files=cfg.data.max_files
     )  
     
@@ -163,7 +164,7 @@ def main(cfg: DictConfig):
         max_time_shift=cfg.data.max_time_shift,
         num_strings=cfg.data.num_strings,
         num_frets=cfg.data.num_frets,
-        # output_format=cfg.data.get('output_format', 'v1'),
+        output_format=cfg.data.get('output_format', 'v1'),
         # max_files=cfg.data.get('max_files', None)
         max_files=None
     )
@@ -210,7 +211,7 @@ def main(cfg: DictConfig):
 
     model = load_checkpoint(checkpoint_path, model, device)
     model.eval()
-
+    
     # Run inference
     print("\n" + "=" * 80)
     print(f"Evaluating on {cfg.data.selected_files_json}")
@@ -229,7 +230,7 @@ def main(cfg: DictConfig):
         device=device,
         max_length=cfg.training.get('ar_eval_max_length', 1024),
         num_beams=cfg.training.get('ar_eval_num_beams', 1),
-        max_batches=None
+        max_batches=None,
         # max_batches=cfg.training.get('ar_eval_max_batches', None),  # None = all batches
         use_constrained_decoding=use_constrained,
         num_frets=cfg.data.num_frets,

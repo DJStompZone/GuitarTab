@@ -5,7 +5,7 @@
 #SBATCH --gres=gpu:1
 #SBATCH --account=ACD114010
 #SBATCH --partition=gp1d
-#SBATCH --output=logs_inference/slurm-%j-inf-v1-constrained.out
+#SBATCH --output=logs_inference/slurm-%j-inf-v1-constrained-time-shift.out
 
 echo "Running on node: $(hostname)"
 
@@ -16,4 +16,5 @@ conda activate MusicFinal
 
 time python inference.py \
     data=test_split \
-    constrained_decoding=true
+    constrained_decoding=true \
+    strict_input_schedule=true
