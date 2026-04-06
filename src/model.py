@@ -234,6 +234,13 @@ class FrettingTransformer(nn.Module):
         # all unfinished initially
         finished = torch.zeros(batch_size, dtype=torch.bool, device=device)
 
+        # Sync constrained-decoding state with decoder prefix token.
+        if logits_processor is not None:
+            if batch_size == 1 and not hasattr(logits_processor, "processors"):
+                logits_processor.update_state(start_token_id[0].item())
+            else:
+                logits_processor.update_state(start_token_id)
+
         past_key_values = None
 
         # Autoregressive loop

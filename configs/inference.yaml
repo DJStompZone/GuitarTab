@@ -11,3 +11,6 @@ checkpoint_path: outputs/2026-03-19_17-38-v1/checkpoint_epoch_100.pt
 
 # Constrained decoding: restrict TAB tokens to pitches from input (NOTE_ON). Set true to enable.
 constrained_decoding: false
+# "input_skeleton" enforces NOTE_ON/NOTE_OFF/TIME_SHIFT to match input exactly.
+# "grammar" keeps the previous grammar-based constraints.
+constrained_decoding_mode: input_skeleton

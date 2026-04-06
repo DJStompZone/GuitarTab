@@ -218,8 +218,10 @@ def main(cfg: DictConfig):
     print("=" * 80)
 
     use_constrained = cfg.get("constrained_decoding", False)
+    constrained_decoding_mode = cfg.get("constrained_decoding_mode", "input_skeleton")
     if use_constrained:
         print("Constrained decoding: enabled")
+        print(f"Constrained decoding mode: {constrained_decoding_mode}")
 
     metrics, (input_ids, targets, predictions) = generate_and_compute_accuracy(
         model=model,
@@ -233,6 +235,7 @@ def main(cfg: DictConfig):
         max_batches=None,
         # max_batches=cfg.training.get('ar_eval_max_batches', None),  # None = all batches
         use_constrained_decoding=use_constrained,
+        constrained_decoding_mode=constrained_decoding_mode,
         num_frets=cfg.data.num_frets,
     )
 

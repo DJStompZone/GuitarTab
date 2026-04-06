@@ -434,6 +434,7 @@ def generate_and_compute_accuracy(
     temperature: float = 1.0,  # NEW
     input_vocab = None,  # NEW: needed for tuning inference in v2
     use_constrained_decoding: bool = False,
+    constrained_decoding_mode: str = "input_skeleton",
     num_frets: int = 25,
 ) -> tuple[TabAccuracyMetrics, tuple[torch.Tensor, torch.Tensor, torch.Tensor]]:
     """
@@ -485,7 +486,12 @@ def generate_and_compute_accuracy(
             if use_constrained_decoding and input_vocab is not None:
                 from src.constrained_decoding import create_constrained_processor
                 logits_processor = create_constrained_processor(
-                    input_ids, input_vocab, output_vocab, num_frets=num_frets, device=device
+                    input_ids,
+                    input_vocab,
+                    output_vocab,
+                    mode=constrained_decoding_mode,
+                    num_frets=num_frets,
+                    device=device,
                 )
 
             # Generate (now uses custom implementation)
