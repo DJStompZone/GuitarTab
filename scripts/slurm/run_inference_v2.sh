@@ -1,12 +1,12 @@
 #!/bin/bash
-#SBATCH --job-name=inf-v2
+#SBATCH --job-name=inf-v2-best
 #SBATCH --nodes=1
 #SBATCH --cpus-per-task=4
 #SBATCH --gres=gpu:1
 #SBATCH --account=ACD114010
 #SBATCH --partition=gp1d
 #SBATCH --time=14:00:00
-#SBATCH --output=logs_inference/slurm-%j-inf-v2.out
+#SBATCH --output=logs_inference/slurm-%j-%x.out
 
 echo "Running on node: $(hostname)"
 

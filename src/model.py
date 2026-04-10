@@ -181,6 +181,7 @@ class FrettingTransformer(nn.Module):
         temperature: float = 1.0,
         verbose: bool = False,
         logits_processor=None,
+        disable_kv_cache: bool = False,
         **kwargs
     ):
         """
@@ -194,6 +195,7 @@ class FrettingTransformer(nn.Module):
             eos_token_id: end token
             pad_token_id: fill for finished seq
             temperature: softmax temperature
+            disable_kv_cache: Disable decoder KV cache during autoregressive decoding
             **kwargs: Additional generation arguments (temperature, top_k, top_p, etc.)
 
         Returns:
@@ -225,7 +227,9 @@ class FrettingTransformer(nn.Module):
             start_token_id = torch.full((batch_size,), 1, dtype=torch.long, device=device)
 
 
-        # Only 1 token as initial input
+        # Decoder input starts with 1 token.
+        # - With KV cache: each step feeds only the newest token.
+        # - Without KV cache: each step feeds the full generated prefix.
         decoder_input = start_token_id.unsqueeze(1)    # [B, 1]
 
         # storage for output tokens
@@ -247,18 +251,25 @@ class FrettingTransformer(nn.Module):
         for step in range(max_length):
 
             with torch.no_grad():
-                # decoder_input contains ONLY the newest token each step after first
+                if disable_kv_cache:
+                    decoder_step_input = torch.stack(generated, dim=1)  # [B, L_prefix]
+                    past_key_values_for_step = None
+                else:
+                    decoder_step_input = decoder_input  # [B, 1]
+                    past_key_values_for_step = past_key_values
+
                 decoder_outputs = self.model.decoder(
-                    input_ids=decoder_input,                # [B, 1]
+                    input_ids=decoder_step_input,
                     encoder_hidden_states=enc_hidden,       # [B, L_enc, d]
                     encoder_attention_mask=attention_mask,  # [B, L_enc]
-                    past_key_values=past_key_values,
-                    use_cache=True,
+                    past_key_values=past_key_values_for_step,
+                    use_cache=not disable_kv_cache,
                     return_dict=True,
                 )
 
                 # update KV cache
-                past_key_values = decoder_outputs.past_key_values
+                if not disable_kv_cache:
+                    past_key_values = decoder_outputs.past_key_values
 
                 # logits for current step token only
                 hidden = decoder_outputs.last_hidden_state     # [B, 1, d_model]
@@ -291,8 +302,9 @@ class FrettingTransformer(nn.Module):
                     print(f"[generate] Finished at step {step}.")
                 break
 
-            # next decoder input is just this newly predicted token
-            decoder_input = next_token.unsqueeze(1)   # shape [B, 1]
+            # next decoder input is just this newly predicted token (KV cache mode only)
+            if not disable_kv_cache:
+                decoder_input = next_token.unsqueeze(1)   # shape [B, 1]
 
         # Stack outputs
         generated = torch.stack(generated, dim=1)  # [B, L_gen]

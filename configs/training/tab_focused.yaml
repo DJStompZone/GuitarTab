@@ -1,0 +1,23 @@
+# Extends training defaults; use with `defaults: - override training: tab_focused` from train_tab_constrained.yaml
+defaults:
+  - default
+
+# full | tab_only | tab_restricted | composite
+# - tab_only: CE only on TAB_* targets (aligns with input_skeleton free steps)
+# - tab_restricted: tab_only + logits masked to pitch-legal TABs (match logits processor)
+# - composite: full-sequence CE + composite_lambda * (tab_restricted on tab labels)
+loss_mode: tab_only
+
+# Used when loss_mode == composite
+composite_lambda: 0.5
+
+# Fretboard for pitch→TAB legality (should match data.num_frets / constrained decoding)
+tab_loss_num_frets: ${data.num_frets}
+
+# --- Checkpoints (use at most one) ---
+# Finetune: load weights only; epoch restarts at 1; new optimizer (e.g. lower training.optimizer.lr).
+init_checkpoint: null
+init_checkpoint_strict: true
+
+# Full resume: model + optimizer; next epoch = saved epoch + 1; best_val_loss restored from ckpt.
+resume_checkpoint: null

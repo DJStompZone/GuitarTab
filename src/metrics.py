@@ -436,6 +436,7 @@ def generate_and_compute_accuracy(
     use_constrained_decoding: bool = False,
     constrained_decoding_mode: str = "input_skeleton",
     num_frets: int = 25,
+    disable_kv_cache: bool = False,
 ) -> tuple[TabAccuracyMetrics, tuple[torch.Tensor, torch.Tensor, torch.Tensor]]:
     """
     Generate sequences autoregressively and compute accuracy.
@@ -505,6 +506,7 @@ def generate_and_compute_accuracy(
                 temperature=temperature,
                 verbose=False,
                 logits_processor=logits_processor,
+                disable_kv_cache=disable_kv_cache,
             )
 
             # Pad/trim both generated and targets to max_length for uniform shape

@@ -219,9 +219,11 @@ def main(cfg: DictConfig):
 
     use_constrained = cfg.get("constrained_decoding", False)
     constrained_decoding_mode = cfg.get("constrained_decoding_mode", "input_skeleton")
+    disable_kv_cache = cfg.get("disable_kv_cache", False)
     if use_constrained:
         print("Constrained decoding: enabled")
         print(f"Constrained decoding mode: {constrained_decoding_mode}")
+    print(f"KV cache disabled: {disable_kv_cache}")
 
     metrics, (input_ids, targets, predictions) = generate_and_compute_accuracy(
         model=model,
@@ -237,6 +239,7 @@ def main(cfg: DictConfig):
         use_constrained_decoding=use_constrained,
         constrained_decoding_mode=constrained_decoding_mode,
         num_frets=cfg.data.num_frets,
+        disable_kv_cache=disable_kv_cache,
     )
 
     # Save predictions and targets

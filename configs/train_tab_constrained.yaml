@@ -1,0 +1,16 @@
+# Hydra entry for TAB-focused / constrained-alignment training (see train_tab_constrained.py).
+# Run: python train_tab_constrained.py
+defaults:
+  - config
+  - override training: tab_focused
+  - _self_
+
+experiment_name: ${exp}-tab-constrained
+output_dir: "outputs/${experiment_name}"
+
+hydra:
+  run:
+    dir: ${output_dir}
+  sweep:
+    dir: "outputs/multirun"
+    subdir: "${hydra.job.num}"

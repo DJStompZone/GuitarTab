@@ -1,12 +1,12 @@
 #!/bin/bash
-#SBATCH --job-name=inf-v1-epoch-50
+#SBATCH --job-name=inf-v1-epoch-best
 #SBATCH --nodes=1
 #SBATCH --cpus-per-task=4
 #SBATCH --gres=gpu:1
 #SBATCH --account=ACD114010
 #SBATCH --partition=gp1d
 #SBATCH --time=14:00:00
-#SBATCH --output=logs_inference/%x.%J.%N.out
+#SBATCH --output=logs_inference/slurm-%j-%x.out
 
 echo "Running on node: $(hostname)"
 
@@ -18,7 +18,7 @@ conda activate MusicFinal
 # Optional: pass checkpoint path as first argument.
 # Example:
 #   sbatch run_inference_v2.sh outputs/xxx/best_model.pt
-CHECKPOINT_PATH="/home/b10502010/work/GuitarTab/outputs/2026-04-01_03-10-v1/checkpoint_epoch_50.pt"
+CHECKPOINT_PATH="/home/b10502010/work/GuitarTab/outputs/2026-04-01_03-10-v1/best_model.pt"
 RUN_TAG="$(date +%Y-%m-%d_%H-%M)-inference-v1"
 
 export TQDM_DISABLE=1

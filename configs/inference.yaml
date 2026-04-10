@@ -14,3 +14,5 @@ constrained_decoding: false
 # "input_skeleton" enforces NOTE_ON/NOTE_OFF/TIME_SHIFT to match input exactly.
 # "grammar" keeps the previous grammar-based constraints.
 constrained_decoding_mode: input_skeleton
+# If true, disable decoder KV cache during autoregressive decoding.
+disable_kv_cache: false
