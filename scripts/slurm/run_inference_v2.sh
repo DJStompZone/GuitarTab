@@ -1,5 +1,5 @@
 #!/bin/bash
-#SBATCH --job-name=inf-v2-best
+#SBATCH --job-name=inf-cmb_v2
 #SBATCH --nodes=1
 #SBATCH --cpus-per-task=4
 #SBATCH --gres=gpu:1
@@ -18,8 +18,8 @@ conda activate MusicFinal
 # Optional: pass checkpoint path as first argument.
 # Example:
 #   sbatch run_inference_v2.sh outputs/xxx/best_model.pt
-CHECKPOINT_PATH="/home/b10502010/work/GuitarTab/outputs/2026-04-01_03-10-v2/best_model.pt"
-RUN_TAG="$(date +%Y-%m-%d_%H-%M)-inference-v2"
+CHECKPOINT_PATH="/home/b10502010/work/GuitarTab/ckpt/combine_v2_token_200_epochs/best_model.pt"
+RUN_TAG="$(date +%Y-%m-%d_%H-%M)-inference-cmb_v2"
 
 export TQDM_DISABLE=1
 

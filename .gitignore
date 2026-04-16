@@ -15,6 +15,7 @@ __pycache__
 
 outputs/
 logs_*/
+ckpt/
 
 .vscode/
 CLAUDE.md

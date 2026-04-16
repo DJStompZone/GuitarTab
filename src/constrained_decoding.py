@@ -77,8 +77,13 @@ def build_steps_from_input_ids(
     Build constrained decoding steps from input sequence.
 
     For each NOTE_ON/OFF/TIME_SHIFT in input:
-    - emit exact same structural token (mapped to output vocab ID)
-    - after NOTE_ON, insert TAB_FOR_PITCH step
+    - NOTE_ON:
+      - v1/v3: emit NOTE_ON fixed token, then TAB_FOR_PITCH
+      - v2: emit TAB_FOR_PITCH only (no NOTE_ON in output vocab)
+    - NOTE_OFF:
+      - v1: emit NOTE_OFF fixed token
+      - v2/v3: skip (no NOTE_OFF in output vocab)
+    - TIME_SHIFT: emit TIME_SHIFT fixed token
     """
     steps: List[DecodingStep] = []
 
@@ -94,7 +99,9 @@ def build_steps_from_input_ids(
 
         if token_str.startswith("NOTE_ON_"):
             out_id = output_vocab.token_to_id.get(token_str)
-            steps.append(DecodingStep(kind="FIXED_TOKEN", token_id=out_id))
+            if out_id is not None:
+                # v1/v3: NOTE_ON exists in output vocab.
+                steps.append(DecodingStep(kind="FIXED_TOKEN", token_id=out_id))
             pitch = _parse_note_pitch(token_str)
             if pitch is not None:
                 steps.append(DecodingStep(kind="TAB_FOR_PITCH", pitch=pitch))
@@ -102,7 +109,9 @@ def build_steps_from_input_ids(
 
         if token_str.startswith("NOTE_OFF_") or token_str.startswith("TIME_SHIFT_"):
             out_id = output_vocab.token_to_id.get(token_str)
-            steps.append(DecodingStep(kind="FIXED_TOKEN", token_id=out_id))
+            if out_id is not None:
+                # v2/v3 may not contain NOTE_OFF in output vocab.
+                steps.append(DecodingStep(kind="FIXED_TOKEN", token_id=out_id))
 
     return steps
 
@@ -451,6 +460,7 @@ class BatchTablatureLogitsProcessor:
         mode: ConstrainedMode = "input_skeleton",
         input_pitches_batch: Optional[List[List[int]]] = None,
         decoding_steps_batch: Optional[List[List[DecodingStep]]] = None,
+        tuning_batch: Optional[List[List[int]]] = None,
         tuning: List[int] = STANDARD_TUNING,
         num_frets: int = DEFAULT_NUM_FRETS,
         device: str = 'cpu'
@@ -480,9 +490,19 @@ class BatchTablatureLogitsProcessor:
             if decoding_steps_batch is None:
                 raise ValueError("decoding_steps_batch is required when mode='input_skeleton'")
             self.batch_size = len(decoding_steps_batch)
+            if tuning_batch is not None and len(tuning_batch) != self.batch_size:
+                raise ValueError(
+                    f"tuning_batch length ({len(tuning_batch)}) must match batch size ({self.batch_size})"
+                )
             self.processors = [
-                TablatureLogitsProcessor(output_vocab, steps, tuning, num_frets, device)
-                for steps in decoding_steps_batch
+                TablatureLogitsProcessor(
+                    output_vocab,
+                    steps,
+                    tuning_batch[b] if tuning_batch is not None else tuning,
+                    num_frets,
+                    device,
+                )
+                for b, steps in enumerate(decoding_steps_batch)
             ]
         else:
             raise ValueError(f"Unknown constrained decoding mode: {mode}")
@@ -582,6 +602,7 @@ def create_constrained_processor(
     input_vocab: Vocabulary,
     output_vocab: Vocabulary,
     mode: ConstrainedMode = "input_skeleton",
+    tuning_batch: Optional[List[List[int]]] = None,
     num_frets: int = DEFAULT_NUM_FRETS,
     device: str = 'cpu'
 ) -> BatchTablatureLogitsProcessor:
@@ -620,6 +641,7 @@ def create_constrained_processor(
         output_vocab=output_vocab,
         mode=mode,
         decoding_steps_batch=decoding_steps_batch,
+        tuning_batch=tuning_batch,
         num_frets=num_frets,
         device=device
     )
