@@ -19,8 +19,7 @@ class TabAccuracyMetrics:
     token_accuracy: float  # % of all tokens correct
 
     # Note-level accuracy
-    # v1: based on NOTE_ON positions
-    # v2: based on TAB positions
+    # Unified (v1/v2): pred TAB pitch vs target TAB pitch (same inferred tuning)
     pitch_accuracy: float  # % of notes with correct pitch
     tab_accuracy: float  # % of notes with correct (string, fret)
 
@@ -30,13 +29,18 @@ class TabAccuracyMetrics:
     # Counts
     total_tokens: int
     total_notes: int
+    # Legacy v1 metric: NOTE_ON token exact-match accuracy
+    note_token_pitch_accuracy: Optional[float] = None
 
     def __str__(self) -> str:
+        legacy_part = ""
+        if self.note_token_pitch_accuracy is not None:
+            legacy_part = f"Pitch Acc (NOTE_ON token): {self.note_token_pitch_accuracy:.2%} | "
         return (
             f"Token Acc: {self.token_accuracy:.2%} | "
             f"Pitch Acc: {self.pitch_accuracy:.2%} | "
+            f"{legacy_part}"
             f"Tab Acc: {self.tab_accuracy:.2%} | "
-            # f"Lev Sim: {self.levenshtein_similarity:.2%} | "
             f"({self.total_notes} notes, {self.total_tokens} tokens)"
         )
 
@@ -231,6 +235,7 @@ def infer_tuning_from_input_output(
 
     return estimated_tuning
 
+
 def compute_tablature_accuracy(
     predictions: torch.Tensor,
     targets: torch.Tensor,
@@ -247,8 +252,8 @@ def compute_tablature_accuracy(
         predictions: [B, L] - Predicted token IDs
         targets: [B, L] - Ground truth token IDs
         output_vocab: Vocabulary object with id_to_token mapping
-        input_ids: Optional [B, L_input] - Input token IDs (needed for tuning inference in v2)
-        input_vocab: Optional input vocabulary (needed for tuning inference in v2)
+        input_ids: Optional [B, L_input] - Input token IDs (for per-sample tuning inference)
+        input_vocab: Optional input vocabulary (for tuning inference)
         pad_id: Padding token ID to ignore
 
     Returns:
@@ -281,120 +286,92 @@ def compute_tablature_accuracy(
     # Detect format based on target tokens
     has_note_on = any(t.startswith("NOTE_ON_") for t in target_tokens)
     
+    # Legacy v1 metric (original): NOTE_ON token exact match.
+    note_token_pitch_accuracy: Optional[float] = None
     if has_note_on:
-        # --- v1 Logic (NOTE_ON based) ---
         note_positions = [
             i for i, token in enumerate(target_tokens) if token.startswith("NOTE_ON_")
         ]
-
-        if len(note_positions) == 0:
-            return TabAccuracyMetrics(
-                token_accuracy=token_accuracy,
-                pitch_accuracy=0.0,
-                tab_accuracy=0.0,
-                difficulty=difficulty,
-                total_tokens=total_tokens,
-                total_notes=0,
-                # levenshtein_distance=0.0,
-                # levenshtein_similarity=0.0
+        if note_positions:
+            pitch_token_correct = sum(
+                1 for pos in note_positions if pred_tokens[pos] == target_tokens[pos]
             )
+            note_token_pitch_accuracy = pitch_token_correct / len(note_positions)
 
-        # Pitch accuracy: check if pitch matches
-        pitch_correct = 0
-        for pos in note_positions:
-            pred_token = pred_tokens[pos]
-            target_token = target_tokens[pos]
-            if pred_token == target_token:
+    # --- Unified v1/v2 note-level logic ---
+    if predictions.dim() != 2 or targets.dim() != 2:
+        return TabAccuracyMetrics(
+            token_accuracy=token_accuracy,
+            pitch_accuracy=0.0,
+            note_token_pitch_accuracy=note_token_pitch_accuracy,
+            tab_accuracy=0.0,
+            difficulty=difficulty,
+            total_tokens=total_tokens,
+            total_notes=0,
+        )
+
+    tab_correct = 0
+    pitch_correct = 0
+    total_notes = 0
+    batch_size = targets.shape[0]
+
+    for b in range(batch_size):
+        sample_target_ids = targets[b]
+        sample_pred_ids = predictions[b]
+
+        # Keep model-vs-target tab alignment on output sequence.
+        sample_mask = sample_target_ids != output_vocab.pad_id
+        sample_target_valid = sample_target_ids[sample_mask]
+        sample_pred_valid = sample_pred_ids[sample_mask]
+
+        sample_target_tokens = [
+            output_vocab.id_to_token[idx.item()] for idx in sample_target_valid
+        ]
+        sample_pred_tokens = [
+            output_vocab.id_to_token[idx.item()] for idx in sample_pred_valid
+        ]
+
+        tab_indices = [
+            i for i, token in enumerate(sample_target_tokens) if token.startswith("TAB_")
+        ]
+        if not tab_indices:
+            continue
+
+        # Infer per-sample tuning whenever possible (critical for non-standard tuning songs).
+        tuning_list = None
+        if input_ids is not None and input_vocab is not None and b < input_ids.shape[0]:
+            sample_tuning = infer_tuning_from_input_output(
+                input_ids[b], sample_target_ids, input_vocab, output_vocab
+            )
+            if sample_tuning is not None:
+                tuning_list = [sample_tuning.get(s, GUITAR_TUNING[s - 1]) for s in range(1, 7)]
+
+        for tab_pos in tab_indices:
+            total_notes += 1
+
+            target_tab = sample_target_tokens[tab_pos]
+            pred_tab = sample_pred_tokens[tab_pos]
+
+            if pred_tab == target_tab:
+                tab_correct += 1
+
+            target_pitch = compute_pitch_from_tab_token(target_tab, tuning=tuning_list)
+            pred_pitch = compute_pitch_from_tab_token(pred_tab, tuning=tuning_list)
+            if (
+                target_pitch != -1
+                and pred_pitch != -1
+                and target_pitch == pred_pitch
+            ):
                 pitch_correct += 1
 
-        pitch_accuracy = pitch_correct / len(note_positions)
-
-        # Tab accuracy: check if following TAB token matches
-        # NOTE_ON is always followed by TAB in output sequence
-        tab_correct = 0
-        tab_eval_positions = []
-
-        for pos in note_positions:
-            # Check if next token is TAB
-            if pos + 1 < len(target_tokens):
-                target_next = target_tokens[pos + 1]
-                if target_next.startswith("TAB_"):
-                    tab_eval_positions.append(pos + 1)
-                    pred_tab = pred_tokens[pos + 1]
-                    if pred_tab == target_next:
-                        tab_correct += 1
-
-        tab_accuracy = tab_correct / len(tab_eval_positions) if tab_eval_positions else 0.0
-        total_notes = len(note_positions)
-
-    else:
-        # --- v2 Logic (TAB based) ---
-        # No NOTE_ON tokens, so evaluate TAB/tuning per-sample.
-        if predictions.dim() != 2 or targets.dim() != 2:
-            return TabAccuracyMetrics(
-                token_accuracy=token_accuracy,
-                pitch_accuracy=0.0,
-                tab_accuracy=0.0,
-                difficulty=difficulty,
-                total_tokens=total_tokens,
-                total_notes=0,
-            )
-
-        tab_correct = 0
-        pitch_correct = 0
-        total_notes = 0
-        batch_size = targets.shape[0]
-
-        for b in range(batch_size):
-            sample_target_ids = targets[b]
-            sample_pred_ids = predictions[b]
-
-            # Align with target non-pad positions to keep per-sample alignment.
-            sample_mask = sample_target_ids != output_vocab.pad_id
-            sample_target_valid = sample_target_ids[sample_mask]
-            sample_pred_valid = sample_pred_ids[sample_mask]
-
-            sample_target_tokens = [
-                output_vocab.id_to_token[idx.item()] for idx in sample_target_valid
-            ]
-            sample_pred_tokens = [
-                output_vocab.id_to_token[idx.item()] for idx in sample_pred_valid
-            ]
-
-            tab_indices = [
-                i for i, token in enumerate(sample_target_tokens) if token.startswith("TAB_")
-            ]
-            if not tab_indices:
-                continue
-
-            tuning_list = None
-            if input_ids is not None and input_vocab is not None and b < input_ids.shape[0]:
-                sample_tuning = infer_tuning_from_input_output(
-                    input_ids[b], sample_target_ids, input_vocab, output_vocab
-                )
-                if sample_tuning is not None:
-                    tuning_list = [sample_tuning.get(s, GUITAR_TUNING[s - 1]) for s in range(1, 7)]
-
-            for pos in tab_indices:
-                total_notes += 1
-                target_token = sample_target_tokens[pos]
-                pred_token = sample_pred_tokens[pos]
-
-                if pred_token == target_token:
-                    tab_correct += 1
-
-                target_pitch = compute_pitch_from_tab_token(target_token, tuning=tuning_list)
-                pred_pitch = compute_pitch_from_tab_token(pred_token, tuning=tuning_list)
-                if target_pitch != -1 and pred_pitch != -1 and target_pitch == pred_pitch:
-                    pitch_correct += 1
-
-        tab_accuracy = tab_correct / total_notes if total_notes > 0 else 0.0
-        pitch_accuracy = pitch_correct / total_notes if total_notes > 0 else 0.0
+    tab_accuracy = tab_correct / total_notes if total_notes > 0 else 0.0
+    pitch_accuracy = pitch_correct / total_notes if total_notes > 0 else 0.0
 
 
     return TabAccuracyMetrics(
         token_accuracy=token_accuracy,
         pitch_accuracy=pitch_accuracy,
+        note_token_pitch_accuracy=note_token_pitch_accuracy,
         tab_accuracy=tab_accuracy,
         difficulty=difficulty,
         total_tokens=total_tokens,

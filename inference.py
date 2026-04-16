@@ -264,6 +264,8 @@ def main(cfg: DictConfig):
     print(f"\nResults:")
     print(f"  Token Accuracy:  {metrics.token_accuracy:.2%}")
     print(f"  Pitch Accuracy:  {metrics.pitch_accuracy:.2%}")
+    if metrics.note_token_pitch_accuracy is not None:
+        print(f"  Pitch Accuracy (NOTE_ON token):  {metrics.note_token_pitch_accuracy:.2%}")
     print(f"  Tab Accuracy:    {metrics.tab_accuracy:.2%}")
     print(f"  Difficulty:      {metrics.difficulty:.5}")
     print(f"  Total Tokens:    {metrics.total_tokens:,}")

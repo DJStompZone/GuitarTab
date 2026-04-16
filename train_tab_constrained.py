@@ -736,6 +736,11 @@ def main(cfg: DictConfig):
         print(f"\nTest Set AR Metrics:")
         print(f"  Token Accuracy:  {test_ar_metrics.token_accuracy:.2%}")
         print(f"  Pitch Accuracy:  {test_ar_metrics.pitch_accuracy:.2%}")
+        if test_ar_metrics.note_token_pitch_accuracy is not None:
+            print(
+                f"  Pitch Accuracy (NOTE_ON token):  "
+                f"{test_ar_metrics.note_token_pitch_accuracy:.2%}"
+            )
         print(f"  Tab Accuracy:    {test_ar_metrics.tab_accuracy:.2%}")
         print(f"  Difficulty:        {test_ar_metrics.difficulty:.2f}")
 
