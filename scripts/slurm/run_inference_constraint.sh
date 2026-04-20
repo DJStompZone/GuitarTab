@@ -1,5 +1,5 @@
 #!/bin/bash
-#SBATCH --job-name=inf-const-cmb_v1
+#SBATCH --job-name=inf-const-cmb_v2
 #SBATCH --nodes=1
 #SBATCH --cpus-per-task=4
 #SBATCH --gres=gpu:1
@@ -14,11 +14,11 @@ ml nvhpc-hpcx-cuda12/24.7
 module load miniconda3
 conda activate MusicFinal
 
-CHECKPOINT_PATH="/home/b10502010/work/GuitarTab/ckpt/combine_v1_token_200_epochs/best_model.pt"
-RUN_TAG="$(date +%Y-%m-%d_%H-%M)-inference-constrained-cmb_v1"
+CHECKPOINT_PATH="/home/b10502010/work/GuitarTab/ckpt/combine_v2_token_200_epochs/best_model.pt"
+RUN_TAG="$(date +%Y-%m-%d_%H-%M)-inference-constrained-cmb_v2"
 
 time python inference.py \
-    data.output_format=v1 \
+    data.output_format=v2 \
     data.selected_files_json=data_splits/test_files.json \
     checkpoint_path="$CHECKPOINT_PATH" \
     experiment_name="$RUN_TAG" \
