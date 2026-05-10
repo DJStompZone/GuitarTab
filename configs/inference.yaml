@@ -14,5 +14,14 @@ constrained_decoding: false
 # "input_skeleton" enforces NOTE_ON/NOTE_OFF/TIME_SHIFT to match input exactly.
 # "grammar" keeps the previous grammar-based constraints.
 constrained_decoding_mode: input_skeleton
+# pitch_mask: when constrained_decoding_mode=input_skeleton, whether to restrict TAB tokens
+# to those consistent with the input pitch (C3). Set false for C2 (skeleton without pitch mask).
+constrained_decoding_pitch_mask: true
 # If true, disable decoder KV cache during autoregressive decoding.
 disable_kv_cache: false
+# Exp 5 / Exp B: collect per-TAB-step logit stats (entropy, KL, margin, etc.)
+# Works with constrained_decoding=true (constrained) or false (stats_only/unconstrained).
+save_logit_stats: false
+# Exp A: collect per-FIXED_TOKEN structural logit stats (NOTE_ON/OFF/TIME_SHIFT confidence).
+# Only effective with constrained_decoding=true and mode=input_skeleton (v1 format).
+save_structural_logit_stats: false

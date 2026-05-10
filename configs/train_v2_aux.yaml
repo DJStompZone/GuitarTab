@@ -1,0 +1,40 @@
+# Configuration for v2+aux model training
+# v2 token sequence (TAB + TIME_SHIFT) with an auxiliary pitch head on the decoder.
+
+defaults:
+  - model: t5_small
+  - data: dadagp
+  - training: default
+  - _self_
+
+seed: 42
+exp: ${now:%Y-%m-%d_%H-%M}
+experiment_name: ${exp}-v2-aux
+output_dir: "ckpt/v2_aux"
+
+# Weight for auxiliary pitch classification loss.
+# total_loss = (1 - pitch_loss_weight) * tab_CE + pitch_loss_weight * pitch_CE
+pitch_loss_weight: 0.5
+
+# Override data format to v2
+data:
+  output_format: "v2"
+  selected_files_json: "data_splits/train_files.json"
+
+# Override training to match dadagp v1/v2 training budget (300 epochs)
+training:
+  num_epochs: 300
+  checkpoint_every_n_epochs: 25
+  ar_eval_enabled: false  # Disable AR eval for speed; focus on loss
+
+hydra:
+  run:
+    dir: ${output_dir}
+  sweep:
+    dir: "outputs/multirun"
+    subdir: "${hydra.job.num}"
+
+wandb:
+  enabled: false
+  project: "guitar-tablature"
+  entity: null

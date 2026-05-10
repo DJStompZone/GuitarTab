@@ -32,7 +32,12 @@ def load_checkpoint(checkpoint_path: str, model, device: str):
     print(f"Loading checkpoint from {checkpoint_path}")
     checkpoint = torch.load(checkpoint_path, map_location=device)
 
-    model.load_state_dict(checkpoint['model_state_dict'])
+    state_dict = checkpoint['model_state_dict']
+    missing, unexpected = model.load_state_dict(state_dict, strict=False)
+    if unexpected:
+        print(f"  [info] Ignored unexpected keys (aux heads): {unexpected}")
+    if missing:
+        print(f"  [warn] Missing keys: {missing}")
     print(f"Loaded model from epoch {checkpoint['epoch']}")
     print(f"  Train loss: {checkpoint['train_loss']:.4f}")
     print(f"  Val loss: {checkpoint['val_loss']:.4f}")
@@ -219,27 +224,46 @@ def main(cfg: DictConfig):
 
     use_constrained = cfg.get("constrained_decoding", False)
     constrained_decoding_mode = cfg.get("constrained_decoding_mode", "input_skeleton")
+    constrained_decoding_pitch_mask = cfg.get("constrained_decoding_pitch_mask", True)
     disable_kv_cache = cfg.get("disable_kv_cache", False)
+    save_logit_stats = cfg.get("save_logit_stats", False)
+    save_structural_logit_stats = cfg.get("save_structural_logit_stats", False)
+
+    output_format = cfg.data.get("output_format", "v1")
+    if use_constrained and constrained_decoding_mode == "grammar" and output_format != "v1":
+        print(
+            f"[warn] grammar constrained decoding is v1-only "
+            f"(output_format={output_format} has no NOTE_ON/OFF tokens in output vocab). "
+            f"Falling back to unconstrained (C1 ≡ C0 for this format)."
+        )
+        use_constrained = False
+
     if use_constrained:
         print("Constrained decoding: enabled")
         print(f"Constrained decoding mode: {constrained_decoding_mode}")
+    if save_logit_stats:
+        mode_label = "constrained" if use_constrained else "unconstrained (stats_only)"
+        print(f"TAB logit stats collection: enabled ({mode_label})")
+    if save_structural_logit_stats:
+        print("Structural logit stats collection: enabled (Exp A)")
     print(f"KV cache disabled: {disable_kv_cache}")
 
-    metrics, (input_ids, targets, predictions) = generate_and_compute_accuracy(
+    metrics, (input_ids, targets, predictions), logit_stats, structural_logit_stats = generate_and_compute_accuracy(
         model=model,
         dataloader=dataloader,
-        # output_vocab=dataset.output_vocab,      # original
         output_vocab=train_dataset.output_vocab,  # Use train vocab for decoding
         input_vocab=dataset.input_vocab,
         device=device,
         max_length=cfg.training.get('ar_eval_max_length', 1024),
         num_beams=cfg.training.get('ar_eval_num_beams', 1),
         max_batches=None,
-        # max_batches=cfg.training.get('ar_eval_max_batches', None),  # None = all batches
         use_constrained_decoding=use_constrained,
         constrained_decoding_mode=constrained_decoding_mode,
+        constrained_decoding_pitch_mask=constrained_decoding_pitch_mask,
         num_frets=cfg.data.num_frets,
         disable_kv_cache=disable_kv_cache,
+        collect_logit_stats=save_logit_stats,
+        collect_structural_logit_stats=save_structural_logit_stats,
     )
 
     # Save predictions and targets
@@ -259,6 +283,35 @@ def main(cfg: DictConfig):
     import json
     with open(cfg.output_dir / "segment_sources.json", "w") as f:
         json.dump(dataset.segment_sources, f)
+
+    if save_logit_stats and logit_stats:
+        logit_stats_file = cfg.output_dir / "logit_stats.pt"
+        torch.save(logit_stats, logit_stats_file)
+        print(f"\nLogit stats saved: {logit_stats_file}  ({len(logit_stats):,} TAB steps)")
+
+        from src.logit_stats import aggregate_logit_stats, print_logit_stats_summary
+        vocab_size = train_dataset.output_vocab.vocab_size
+        summary = aggregate_logit_stats(logit_stats, vocab_size=vocab_size)
+        print_logit_stats_summary(summary)
+
+        summary_file = cfg.output_dir / "logit_stats_summary.json"
+        with open(summary_file, "w") as f:
+            json.dump(summary, f, indent=2)
+        print(f"Logit stats summary: {summary_file}")
+
+    if save_structural_logit_stats and structural_logit_stats:
+        struct_stats_file = cfg.output_dir / "structural_logit_stats.pt"
+        torch.save(structural_logit_stats, struct_stats_file)
+        print(f"\nStructural logit stats saved: {struct_stats_file}  ({len(structural_logit_stats):,} structural steps)")
+
+        from src.logit_stats import aggregate_structural_stats, print_structural_stats_summary
+        struct_summary = aggregate_structural_stats(structural_logit_stats)
+        print_structural_stats_summary(struct_summary)
+
+        struct_summary_file = cfg.output_dir / "structural_logit_stats_summary.json"
+        with open(struct_summary_file, "w") as f:
+            json.dump(struct_summary, f, indent=2)
+        print(f"Structural logit stats summary: {struct_summary_file}")
 
 
     print(f"\nResults:")

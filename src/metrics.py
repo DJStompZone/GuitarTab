@@ -3,7 +3,7 @@ Evaluation metrics for guitar tablature transcription.
 """
 
 from dataclasses import dataclass
-from typing import Optional, List, Tuple, Dict
+from typing import Optional, List, Tuple, Dict, Literal
 import torch
 from tqdm import tqdm
 from collections import Counter, defaultdict
@@ -391,8 +391,11 @@ def generate_and_compute_accuracy(
     input_vocab = None,  # NEW: needed for tuning inference in v2
     use_constrained_decoding: bool = False,
     constrained_decoding_mode: str = "input_skeleton",
+    constrained_decoding_pitch_mask: bool = True,  # C3=True, C2=False
     num_frets: int = 25,
     disable_kv_cache: bool = False,
+    collect_logit_stats: bool = False,       # Exp 5 / Exp B: per-TAB-step logit stats
+    collect_structural_logit_stats: bool = False,  # Exp A: per-FIXED_TOKEN logit stats
 ) -> tuple[TabAccuracyMetrics, tuple[torch.Tensor, torch.Tensor, torch.Tensor]]:
     """
     Generate sequences autoregressively and compute accuracy.
@@ -415,6 +418,9 @@ def generate_and_compute_accuracy(
     all_predictions = []
     all_input_ids = []
     all_targets = []
+    all_logit_stats: List = []            # collected when collect_logit_stats=True
+    all_structural_logit_stats: List = [] # collected when collect_structural_logit_stats=True
+    global_sample_offset = 0              # cumulative sample count across batches
 
     # Determine total batches for progress bar
     total_batches = max_batches if max_batches is not None else len(dataloader)
@@ -440,7 +446,7 @@ def generate_and_compute_accuracy(
                 start_token_id = None  # Will use BOS=1
 
             logits_processor = None
-            if use_constrained_decoding and input_vocab is not None:
+            if input_vocab is not None and (use_constrained_decoding or collect_logit_stats or collect_structural_logit_stats):
                 from src.constrained_decoding import create_constrained_processor
                 tuning_batch = None
                 if constrained_decoding_mode == "input_skeleton":
@@ -456,6 +462,9 @@ def generate_and_compute_accuracy(
                             tuning_batch.append(
                                 [sample_tuning.get(s, GUITAR_TUNING[s - 1]) for s in range(1, 7)]
                             )
+                # stats_only=True when we want TAB/structural stats without constraining
+                # (i.e. unconstrained run but still want to collect logit stats)
+                _stats_only = (not use_constrained_decoding) and (collect_logit_stats or collect_structural_logit_stats)
                 logits_processor = create_constrained_processor(
                     input_ids,
                     input_vocab,
@@ -464,6 +473,10 @@ def generate_and_compute_accuracy(
                     tuning_batch=tuning_batch,
                     num_frets=num_frets,
                     device=device,
+                    collect_stats=collect_logit_stats,
+                    collect_structural_stats=collect_structural_logit_stats,
+                    stats_only=_stats_only,
+                    pitch_mask=constrained_decoding_pitch_mask,
                 )
 
             # Generate (now uses custom implementation)
@@ -479,6 +492,16 @@ def generate_and_compute_accuracy(
                 logits_processor=logits_processor,
                 disable_kv_cache=disable_kv_cache,
             )
+
+            # Collect TAB logit stats from this batch (Exp 5 / Exp B)
+            if collect_logit_stats and logits_processor is not None and hasattr(logits_processor, "get_batch_stats"):
+                batch_stats = logits_processor.get_batch_stats(sample_offset=global_sample_offset)
+                all_logit_stats.extend(batch_stats)
+
+            # Collect structural logit stats from this batch (Exp A)
+            if collect_structural_logit_stats and logits_processor is not None and hasattr(logits_processor, "get_batch_structural_stats"):
+                batch_struct_stats = logits_processor.get_batch_structural_stats(sample_offset=global_sample_offset)
+                all_structural_logit_stats.extend(batch_struct_stats)
 
             # Pad/trim both generated and targets to max_length for uniform shape
             B = target_ids.shape[0]
@@ -516,6 +539,7 @@ def generate_and_compute_accuracy(
             all_input_ids.append(input_ids)
             all_predictions.append(generated)
             all_targets.append(target_ids)
+            global_sample_offset += input_ids.shape[0]
 
             # Update progress bar with current batch info
             pbar.set_postfix(
@@ -548,10 +572,9 @@ def generate_and_compute_accuracy(
         output_vocab=output_vocab,
         input_ids=input_ids,
         input_vocab=input_vocab,
-        # pad_id=output_vocab.pad_id,
     )
 
-    return metrics, (input_ids, targets, predictions)
+    return metrics, (input_ids, targets, predictions), all_logit_stats, all_structural_logit_stats
 
 def extract_tab_positions(tokens):
     """
@@ -568,6 +591,57 @@ def extract_tab_positions(tokens):
             except ValueError:
                 pass
     return positions
+
+def classify_aligned_note_error(
+    target_string: Optional[int],
+    target_fret: Optional[int],
+    pred_string: Optional[int],
+    pred_fret: Optional[int],
+    tuning: Optional[List[int]] = None,
+) -> Literal["correct", "Tab_3.1", "Tab_3.2"]:
+    """
+    Classify a time-aligned (matched) note pair into the format-invariant error taxonomy.
+
+    Classes:
+      correct  — (string, fret) identical → pitch and fingering both right
+      Tab_3.1  — same pitch, different fingering (enharmonic position error)
+      Tab_3.2  — different pitch (and necessarily different fingering)
+
+    G (grammar) and T (time-alignment) errors are at the sequence level and
+    must be counted before calling this function.
+
+    Args:
+        target_string, target_fret: Ground-truth tab position (1-indexed string).
+        pred_string, pred_fret: Predicted tab position.
+        tuning: Open-string MIDI pitches [s1..s6]. Defaults to GUITAR_TUNING.
+
+    Returns:
+        One of "correct", "Tab_3.1", "Tab_3.2".
+    """
+    if (
+        target_string is None
+        or target_fret is None
+        or pred_string is None
+        or pred_fret is None
+    ):
+        return "Tab_3.2"
+
+    tab_match = (target_string, target_fret) == (pred_string, pred_fret)
+    if tab_match:
+        return "correct"
+
+    t_tok = f"TAB_{target_string}_{target_fret}"
+    p_tok = f"TAB_{pred_string}_{pred_fret}"
+    target_pitch = compute_pitch_from_tab_token(t_tok, tuning=tuning)
+    pred_pitch = compute_pitch_from_tab_token(p_tok, tuning=tuning)
+
+    if target_pitch == -1 or pred_pitch == -1:
+        return "Tab_3.2"
+
+    if target_pitch == pred_pitch:
+        return "Tab_3.1"
+    return "Tab_3.2"
+
 
 def difficulty_score(positions, alpha=0.25):
     """

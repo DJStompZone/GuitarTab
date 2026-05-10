@@ -7,11 +7,16 @@ Supports two modes:
   with TAB inserted after each NOTE_ON.
 """
 
-from typing import List, Optional, Dict, Tuple, Set, Literal
+from typing import List, Optional, Dict, Tuple, Set, Literal, Any
 import torch
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 from src.tab_dataset import Vocabulary
+from src.logit_stats import (
+    LogitStatsAccumulator,
+    compute_tab_step_stats,
+    compute_structural_step_stats,
+)
 
 
 # Standard guitar tuning (MIDI pitches for open strings)
@@ -180,17 +185,119 @@ class InputSkeletonTablatureLogitsProcessor(_BaseTablatureProcessor):
         tuning: List[int] = STANDARD_TUNING,
         num_frets: int = DEFAULT_NUM_FRETS,
         device: str = "cpu",
+        collect_stats: bool = False,
+        collect_structural_stats: bool = False,
+        stats_only: bool = False,
+        pitch_mask: bool = True,
     ):
         super().__init__(output_vocab=output_vocab, tuning=tuning, num_frets=num_frets)
         self.steps = steps
         self.device = device
         self.step_idx = 0
+        self._collect_stats = collect_stats
+        self._collect_structural_stats = collect_structural_stats
+        self._stats_only = stats_only
+        self._pitch_mask = pitch_mask  # C3: True; C2: False (allow any TAB)
+        # Per-sample TAB stats
+        self.step_stats: List[Dict[str, Any]] = []
+        self._tab_step_counter: int = 0
+        # Per-sample structural (FIXED_TOKEN) stats
+        self.structural_step_stats: List[Dict[str, Any]] = []
+        self._structural_step_counter: int = 0
+        # Override tracking (Exp 2: how many times mask changed the free argmax)
+        self.override_counts: Dict[str, int] = {
+            "NOTE_ON_forced": 0,
+            "NOTE_OFF_forced": 0,
+            "TIME_SHIFT_forced": 0,
+            "TAB_pitch_forced": 0,
+            "total_overrides": 0,
+        }
 
     def reset_state(self):
         self.step_idx = 0
+        self.step_stats = []
+        self._tab_step_counter = 0
+        self.structural_step_stats = []
+        self._structural_step_counter = 0
+        self.override_counts = {
+            "NOTE_ON_forced": 0,
+            "NOTE_OFF_forced": 0,
+            "TIME_SHIFT_forced": 0,
+            "TAB_pitch_forced": 0,
+            "total_overrides": 0,
+        }
+        # NOTE: self._pitch_mask is not reset here; it's set at construction time.
 
     def __call__(self, input_ids: torch.Tensor, scores: torch.Tensor) -> torch.Tensor:
+        if self.step_idx < len(self.steps):
+            current_step = self.steps[self.step_idx]
+
+            # Collect TAB logit stats (Exp 5 / Exp B)
+            if (
+                self._collect_stats
+                and current_step.kind == "TAB_FOR_PITCH"
+                and current_step.pitch is not None
+            ):
+                valid_tab_ids = self.pitch_to_tab_token_ids.get(current_step.pitch, [])
+                stats = compute_tab_step_stats(
+                    scores=scores,
+                    valid_tab_ids=valid_tab_ids,
+                    pitch=current_step.pitch,
+                )
+                stats["_tab_step_local"] = self._tab_step_counter
+                self._tab_step_counter += 1
+                self.step_stats.append(stats)
+
+            # Collect structural logit stats (Exp A)
+            if (
+                self._collect_structural_stats
+                and current_step.kind == "FIXED_TOKEN"
+                and current_step.token_id is not None
+            ):
+                token_str = self.vocab.id_to_token.get(current_step.token_id, "")
+                if token_str.startswith("NOTE_ON_"):
+                    tt = "NOTE_ON"
+                elif token_str.startswith("NOTE_OFF_"):
+                    tt = "NOTE_OFF"
+                elif token_str.startswith("TIME_SHIFT_"):
+                    tt = "TIME_SHIFT"
+                else:
+                    tt = "OTHER"
+                struct_stats = compute_structural_step_stats(
+                    scores=scores,
+                    correct_token_id=current_step.token_id,
+                    token_type=tt,
+                )
+                struct_stats["_structural_step_local"] = self._structural_step_counter
+                self._structural_step_counter += 1
+                self.structural_step_stats.append(struct_stats)
+
+        if self._stats_only:
+            # Do not mask — just return raw scores for unconstrained (Exp B)
+            return scores
+
         mask = self._compute_valid_token_mask(scores.device)
+
+        # Track overrides: did masking change what the free argmax would have been?
+        if self.step_idx < len(self.steps):
+            free_argmax = int(scores.argmax().item())
+            if not mask[free_argmax]:
+                step = self.steps[self.step_idx]
+                token_str = (
+                    self.vocab.id_to_token.get(step.token_id, "")
+                    if step.kind == "FIXED_TOKEN" and step.token_id is not None
+                    else ""
+                )
+                if token_str.startswith("NOTE_ON_"):
+                    self.override_counts["NOTE_ON_forced"] += 1
+                elif token_str.startswith("NOTE_OFF_"):
+                    self.override_counts["NOTE_OFF_forced"] += 1
+                elif token_str.startswith("TIME_SHIFT_"):
+                    self.override_counts["TIME_SHIFT_forced"] += 1
+                elif step.kind == "TAB_FOR_PITCH":
+                    self.override_counts["TAB_pitch_forced"] += 1
+                self.override_counts["total_overrides"] += 1
+
         return scores.masked_fill(~mask, float("-inf"))
 
     def _compute_valid_token_mask(self, device: torch.device) -> torch.Tensor:
@@ -207,7 +314,14 @@ class InputSkeletonTablatureLogitsProcessor(_BaseTablatureProcessor):
             return mask
 
         if step.kind == "TAB_FOR_PITCH" and step.pitch is not None:
-            self._add_valid_tab_tokens_for_pitch(mask, step.pitch)
+            if self._pitch_mask:
+                # C3: restrict to fretboard-valid TABs for this pitch
+                self._add_valid_tab_tokens_for_pitch(mask, step.pitch)
+            else:
+                # C2: allow any TAB token (no pitch restriction)
+                for token, tid in self.vocab.token_to_id.items():
+                    if token.startswith("TAB_"):
+                        mask[tid] = True
             return mask
 
         return mask
@@ -220,6 +334,11 @@ class InputSkeletonTablatureLogitsProcessor(_BaseTablatureProcessor):
             return
 
         if self.step_idx >= len(self.steps):
+            return
+
+        if self._stats_only:
+            # Unconditionally advance: assume model output order ≈ expected sequence
+            self.step_idx += 1
             return
 
         step = self.steps[self.step_idx]
@@ -463,11 +582,15 @@ class BatchTablatureLogitsProcessor:
         tuning_batch: Optional[List[List[int]]] = None,
         tuning: List[int] = STANDARD_TUNING,
         num_frets: int = DEFAULT_NUM_FRETS,
-        device: str = 'cpu'
+        device: str = 'cpu',
+        collect_stats: bool = False,
+        collect_structural_stats: bool = False,
+        stats_only: bool = False,
+        pitch_mask: bool = True,
     ):
         """
         Initialize batch processor.
-        
+
         Args:
             output_vocab: Output vocabulary
             mode: Constrained decoding mode ("grammar" or "input_skeleton")
@@ -476,8 +599,15 @@ class BatchTablatureLogitsProcessor:
             tuning: Guitar tuning
             num_frets: Number of frets (should match config, e.g. 25)
             device: Device for tensor operations
+            collect_stats: If True, per-TAB-step logit stats are recorded (Exp 5 / Exp B)
+            collect_structural_stats: If True, per-FIXED_TOKEN logit stats are recorded (Exp A)
+            stats_only: If True, disable masking; only track steps and collect stats (Exp B unconstrained)
         """
         self.mode = mode
+        self._collect_stats = collect_stats
+        self._collect_structural_stats = collect_structural_stats
+        self._stats_only = stats_only
+        self._pitch_mask = pitch_mask
         if mode == "grammar":
             if input_pitches_batch is None:
                 raise ValueError("input_pitches_batch is required when mode='grammar'")
@@ -501,6 +631,10 @@ class BatchTablatureLogitsProcessor:
                     tuning_batch[b] if tuning_batch is not None else tuning,
                     num_frets,
                     device,
+                    collect_stats=collect_stats,
+                    collect_structural_stats=collect_structural_stats,
+                    stats_only=stats_only,
+                    pitch_mask=pitch_mask,
                 )
                 for b, steps in enumerate(decoding_steps_batch)
             ]
@@ -546,6 +680,84 @@ class BatchTablatureLogitsProcessor:
         """Reset state for all processors."""
         for processor in self.processors:
             processor.reset_state()
+
+    def collect_per_class_overrides(self) -> Dict[str, int]:
+        """
+        Aggregate per-class override counts from all per-sample processors.
+
+        An "override" happens when the logit mask forces the model to choose a
+        token different from its unconstrained argmax.  Each entry records how
+        many times the mask intervened at each structural token class
+        (NOTE_ON, NOTE_OFF, TIME_SHIFT, TAB_pitch_mask).
+
+        Returns a dict:
+          {
+            "NOTE_ON_forced": <int>,
+            "NOTE_OFF_forced": <int>,
+            "TIME_SHIFT_forced": <int>,
+            "TAB_pitch_forced": <int>,
+            "total_overrides": <int>,
+          }
+
+        This is populated only by InputSkeletonTablatureLogitsProcessor instances
+        that record override stats.  Grammar-mode processors return zero counts.
+        """
+        counts: Dict[str, int] = {
+            "NOTE_ON_forced": 0,
+            "NOTE_OFF_forced": 0,
+            "TIME_SHIFT_forced": 0,
+            "TAB_pitch_forced": 0,
+            "total_overrides": 0,
+        }
+        for proc in self.processors:
+            if hasattr(proc, "override_counts"):
+                for k in counts:
+                    counts[k] += proc.override_counts.get(k, 0)
+        return counts
+
+    def get_batch_stats(self, sample_offset: int = 0) -> List[Dict[str, Any]]:
+        """
+        Collect per-TAB-step stats from all processors in this batch.
+
+        Only meaningful when mode='input_skeleton' and collect_stats=True.
+        Each record gets sample_idx = sample_offset + local_batch_index.
+
+        Returns a flat list of stat dicts (one per TAB step across all samples).
+        """
+        results: List[Dict[str, Any]] = []
+        if not self._collect_stats or self.mode != "input_skeleton":
+            return results
+        for b, proc in enumerate(self.processors):
+            if not hasattr(proc, "step_stats"):
+                continue
+            for rec in proc.step_stats:
+                new_rec = dict(rec)
+                new_rec["sample_idx"] = sample_offset + b
+                new_rec["step_idx"] = new_rec.pop("_tab_step_local", 0)
+                results.append(new_rec)
+        return results
+
+    def get_batch_structural_stats(self, sample_offset: int = 0) -> List[Dict[str, Any]]:
+        """
+        Collect per-FIXED_TOKEN structural stats from all processors in this batch.
+
+        Only meaningful when mode='input_skeleton' and collect_structural_stats=True.
+        Each record gets sample_idx = sample_offset + local_batch_index.
+
+        Returns a flat list of stat dicts (one per structural step across all samples).
+        """
+        results: List[Dict[str, Any]] = []
+        if not self._collect_structural_stats or self.mode != "input_skeleton":
+            return results
+        for b, proc in enumerate(self.processors):
+            if not hasattr(proc, "structural_step_stats"):
+                continue
+            for rec in proc.structural_step_stats:
+                new_rec = dict(rec)
+                new_rec["sample_idx"] = sample_offset + b
+                new_rec["step_idx"] = new_rec.pop("_structural_step_local", 0)
+                results.append(new_rec)
+        return results
 
 
 def extract_pitches_from_input_ids(
@@ -604,13 +816,17 @@ def create_constrained_processor(
     mode: ConstrainedMode = "input_skeleton",
     tuning_batch: Optional[List[List[int]]] = None,
     num_frets: int = DEFAULT_NUM_FRETS,
-    device: str = 'cpu'
+    device: str = 'cpu',
+    collect_stats: bool = False,
+    collect_structural_stats: bool = False,
+    stats_only: bool = False,
+    pitch_mask: bool = True,
 ) -> BatchTablatureLogitsProcessor:
     """
     Create a batch logits processor from input IDs.
-    
+
     Convenience function for inference.
-    
+
     Args:
         input_ids: [batch_size, seq_len] - Input token IDs
         input_vocab: Input vocabulary
@@ -618,11 +834,14 @@ def create_constrained_processor(
         mode: Constrained decoding mode ("grammar" or "input_skeleton")
         num_frets: Number of frets (should match config, e.g. 25)
         device: Device for tensor operations
-        
+        collect_stats: If True, per-TAB-step logit statistics are recorded.
+                       Effective for input_skeleton mode (Exp 5 / Exp B).
+        collect_structural_stats: If True, per-FIXED_TOKEN logit stats are recorded (Exp A).
+        stats_only: If True, no masking is applied; only step tracking + stats (Exp B unconstrained).
+
     Returns:
         Configured BatchTablatureLogitsProcessor
     """
-    # Handle single sequence (add batch dimension)
     if input_ids.dim() == 1:
         input_ids = input_ids.unsqueeze(0)
 
@@ -633,7 +852,8 @@ def create_constrained_processor(
             mode=mode,
             input_pitches_batch=input_pitches_batch,
             num_frets=num_frets,
-            device=device
+            device=device,
+            collect_stats=collect_stats,
         )
 
     decoding_steps_batch = build_steps_batch(input_ids, input_vocab, output_vocab)
@@ -643,5 +863,9 @@ def create_constrained_processor(
         decoding_steps_batch=decoding_steps_batch,
         tuning_batch=tuning_batch,
         num_frets=num_frets,
-        device=device
+        device=device,
+        collect_stats=collect_stats,
+        collect_structural_stats=collect_structural_stats,
+        stats_only=stats_only,
+        pitch_mask=pitch_mask,
     )

@@ -80,5 +80,5 @@ def plot(json_path):
         print(f"Zoomed plot saved to: {save_path_zoom}")
 
 if __name__ == "__main__":
-    json_path = "/home/b10502010/work/GuitarTab/outputs/2026-04-08_01-08-ft-constrained-tab_only-best/training_log.json"
+    json_path = "/home/b10502010/work/GuitarTab/ckpt/v2_aux/training_log.json"
     plot(json_path)

@@ -103,12 +103,41 @@ def _write_syntax_summary(path: Path, robust_metrics):
     lines.append(f"tab_acc_aligned: {robust_metrics.tab_acc_aligned:.6f}")
     lines.append(f"pitch_acc_aligned: {robust_metrics.pitch_acc_aligned:.6f}")
     lines.append("")
+    lines.append("[Strict track]")
+    lines.append(f"strict_tab_acc: {robust_metrics.strict_tab_acc:.6f}")
+    lines.append(f"strict_pitch_acc: {robust_metrics.strict_pitch_acc:.6f}")
+    lines.append(f"syntax_penalty_pred: {robust_metrics.syntax_penalty_pred:.6f}")
+    lines.append(f"strict_tab_score: {robust_metrics.strict_tab_score:.6f}")
+    lines.append(f"strict_pitch_score: {robust_metrics.strict_pitch_score:.6f}")
+    lines.append("")
+    lines.append("[Normalized track]")
+    lines.append(f"valid_event_ratio_target: {robust_metrics.valid_event_ratio_target:.6f}")
+    lines.append(f"valid_event_ratio_pred: {robust_metrics.valid_event_ratio_pred:.6f}")
+    lines.append(f"normalized_tab_acc: {robust_metrics.normalized_tab_acc:.6f}")
+    lines.append(f"normalized_pitch_acc: {robust_metrics.normalized_pitch_acc:.6f}")
+    lines.append("")
     lines.append("[Token-class tolerant metrics]")
     for cls_name, values in sorted(robust_metrics.token_class_metrics.items()):
         lines.append(
             f"{cls_name}: P={values['precision']:.6f}, R={values['recall']:.6f}, F1={values['f1']:.6f}, "
             f"matched={int(values['matched'])}/{int(values['target_total'])} target"
         )
+    lines.append("")
+    lines.append("[Syntax issues per 1k tokens - Target]")
+    for k, v in sorted(robust_metrics.syntax_issues_per_1k_tokens_target.items()):
+        lines.append(f"{k}: {v:.4f}")
+    lines.append("")
+    lines.append("[Syntax issues per 1k tokens - Prediction]")
+    for k, v in sorted(robust_metrics.syntax_issues_per_1k_tokens_pred.items()):
+        lines.append(f"{k}: {v:.4f}")
+    lines.append("")
+    lines.append("[Syntax issues per 1k events - Target]")
+    for k, v in sorted(robust_metrics.syntax_issues_per_1k_events_target.items()):
+        lines.append(f"{k}: {v:.4f}")
+    lines.append("")
+    lines.append("[Syntax issues per 1k events - Prediction]")
+    for k, v in sorted(robust_metrics.syntax_issues_per_1k_events_pred.items()):
+        lines.append(f"{k}: {v:.4f}")
 
     path.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
@@ -225,6 +254,7 @@ def main():
         input_ids=input_ids,
         input_vocab=input_vocab if input_ids is not None else None,
         timeline_tolerance=args.timeline_tolerance,
+        output_format=str(cfg.data.get("output_format", "v1")),
         max_time_shift=max_time_shift,
     )
 
@@ -284,6 +314,19 @@ def main():
     print(f"f1:                {robust_metrics.f1:.4f}")
     print(f"tab_acc_aligned:   {robust_metrics.tab_acc_aligned:.4f}")
     print(f"pitch_acc_aligned: {robust_metrics.pitch_acc_aligned:.4f}")
+    print("")
+    print("[Strict track]")
+    print(f"strict_tab_acc:    {robust_metrics.strict_tab_acc:.4f}")
+    print(f"strict_pitch_acc:  {robust_metrics.strict_pitch_acc:.4f}")
+    print(f"syntax_penalty:    {robust_metrics.syntax_penalty_pred:.4f}")
+    print(f"strict_tab_score:  {robust_metrics.strict_tab_score:.4f}")
+    print(f"strict_pitch_score:{robust_metrics.strict_pitch_score:.4f}")
+    print("")
+    print("[Normalized track]")
+    print(f"valid_ratio_tgt:   {robust_metrics.valid_event_ratio_target:.4f}")
+    print(f"valid_ratio_pred:  {robust_metrics.valid_event_ratio_pred:.4f}")
+    print(f"norm_tab_acc:      {robust_metrics.normalized_tab_acc:.4f}")
+    print(f"norm_pitch_acc:    {robust_metrics.normalized_pitch_acc:.4f}")
     print("")
     print("[Baseline metrics — same as inference.py TabAccuracyMetrics]")
     print("")
