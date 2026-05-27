@@ -143,6 +143,9 @@ class RobustMetricsResult:
     error_class_counts: Optional[Dict[str, int]] = None
     error_class_marginal_rates: Optional[Dict[str, float]] = None
     error_class_conditional_rates: Optional[Dict[str, float]] = None
+    # --- Positional (index-based) error taxonomy: T+Tab_3_1+Tab_3_2+correct == 1.0 ---
+    positional_error_class_counts: Optional[Dict[str, int]] = None
+    positional_error_class_rates: Optional[Dict[str, float]] = None
 
     def to_dict(self) -> Dict:
         data = asdict(self)
@@ -402,6 +405,103 @@ def _syntax_penalty_from_rates(issue_rates_per_1k: Dict[str, float]) -> float:
     for issue_name, rate in issue_rates_per_1k.items():
         weighted_rate += issue_weights.get(issue_name, 1.0) * rate
     return min(1.0, weighted_rate / 100.0)
+
+
+def _compute_positional_error_taxonomy(
+    predictions: torch.Tensor,
+    targets: torch.Tensor,
+    output_vocab,
+    input_ids: Optional[torch.Tensor] = None,
+    input_vocab=None,
+) -> Tuple[Dict[str, int], Dict[str, float]]:
+    """
+    Error taxonomy using positional (index) alignment — same masking as tab_accuracy.
+
+    For every target TAB position, pred at the identical sequence index is compared:
+      T       — pred token is not a TAB token (note absent/replaced)
+      Tab_3_2 — pred TAB has different pitch
+      Tab_3_1 — pred TAB has same pitch but different (string, fret)
+      correct — pred TAB is identical
+
+    Invariant: T + Tab_3_1 + Tab_3_2 + correct == total_target == 100 %
+    """
+    T = 0
+    Tab_3_1 = 0
+    Tab_3_2 = 0
+    correct = 0
+    total_target = 0
+
+    batch_size = targets.shape[0]
+
+    for b in range(batch_size):
+        sample_target_ids = targets[b]
+        sample_pred_ids = predictions[b]
+
+        # Apply target non-pad mask to both (mirrors compute_tablature_accuracy).
+        sample_mask = sample_target_ids != output_vocab.pad_id
+        sample_target_valid = sample_target_ids[sample_mask]
+        sample_pred_valid = sample_pred_ids[sample_mask]
+
+        sample_target_tokens = [output_vocab.id_to_token[idx.item()] for idx in sample_target_valid]
+        sample_pred_tokens = [output_vocab.id_to_token[idx.item()] for idx in sample_pred_valid]
+
+        tab_indices = [i for i, t in enumerate(sample_target_tokens) if t.startswith("TAB_")]
+        if not tab_indices:
+            continue
+
+        tuning_list = None
+        if input_ids is not None and input_vocab is not None and b < input_ids.shape[0]:
+            sample_tuning = infer_tuning_from_input_output(
+                input_ids[b], sample_target_ids, input_vocab, output_vocab
+            )
+            if sample_tuning is not None:
+                tuning_list = [sample_tuning.get(s, GUITAR_TUNING[s - 1]) for s in range(1, 7)]
+
+        for tab_pos in tab_indices:
+            total_target += 1
+            target_tab = sample_target_tokens[tab_pos]
+            pred_tab = sample_pred_tokens[tab_pos]
+
+            if not pred_tab.startswith("TAB_"):
+                T += 1
+                continue
+
+            try:
+                _, ts, tf = target_tab.split("_")
+                target_string, target_fret = int(ts), int(tf)
+                _, ps, pf = pred_tab.split("_")
+                pred_string, pred_fret = int(ps), int(pf)
+            except (ValueError, AttributeError):
+                Tab_3_2 += 1
+                continue
+
+            ec_label = classify_aligned_note_error(
+                target_string, target_fret,
+                pred_string, pred_fret,
+                tuning=tuning_list,
+            )
+            if ec_label == "correct":
+                correct += 1
+            elif ec_label == "Tab_3.1":
+                Tab_3_1 += 1
+            else:
+                Tab_3_2 += 1
+
+    counts: Dict[str, int] = {
+        "T": T,
+        "Tab_3_1": Tab_3_1,
+        "Tab_3_2": Tab_3_2,
+        "correct": correct,
+        "total_target": total_target,
+    }
+    denom = max(total_target, 1)
+    rates: Dict[str, float] = {
+        "T_rate": T / denom,
+        "Tab_3_2_rate": Tab_3_2 / denom,
+        "Tab_3_1_rate": Tab_3_1 / denom,
+        "correct_rate": correct / denom,
+    }
+    return counts, rates
 
 
 def compute_robust_alignment_metrics(
@@ -681,4 +781,14 @@ def compute_robust_alignment_metrics(
         },
         error_class_marginal_rates=agg_ec.marginal_rates(),
         error_class_conditional_rates=agg_ec.conditional_rates(),
+        **dict(zip(
+            ("positional_error_class_counts", "positional_error_class_rates"),
+            _compute_positional_error_taxonomy(
+                predictions=predictions,
+                targets=targets,
+                output_vocab=output_vocab,
+                input_ids=input_ids,
+                input_vocab=input_vocab,
+            ),
+        )),
     )

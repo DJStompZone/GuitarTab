@@ -138,6 +138,16 @@ def _write_syntax_summary(path: Path, robust_metrics):
     lines.append("[Syntax issues per 1k events - Prediction]")
     for k, v in sorted(robust_metrics.syntax_issues_per_1k_events_pred.items()):
         lines.append(f"{k}: {v:.4f}")
+    if robust_metrics.positional_error_class_rates is not None:
+        lines.append("")
+        lines.append("[Positional error taxonomy (index-based; T+Tab_3_1+Tab_3_2+correct=100%)]")
+        r = robust_metrics.positional_error_class_rates
+        c = robust_metrics.positional_error_class_counts
+        lines.append(f"correct_rate:  {r['correct_rate']:.6f}  ({c['correct']}/{c['total_target']})")
+        lines.append(f"Tab_3_1_rate:  {r['Tab_3_1_rate']:.6f}  ({c['Tab_3_1']})")
+        lines.append(f"Tab_3_2_rate:  {r['Tab_3_2_rate']:.6f}  ({c['Tab_3_2']})")
+        lines.append(f"T_rate:        {r['T_rate']:.6f}  ({c['T']})")
+        lines.append(f"sum:           {r['correct_rate']+r['Tab_3_1_rate']+r['Tab_3_2_rate']+r['T_rate']:.6f}")
 
     path.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
@@ -328,6 +338,16 @@ def main():
     print(f"norm_tab_acc:      {robust_metrics.normalized_tab_acc:.4f}")
     print(f"norm_pitch_acc:    {robust_metrics.normalized_pitch_acc:.4f}")
     print("")
+    if robust_metrics.positional_error_class_rates is not None:
+        r = robust_metrics.positional_error_class_rates
+        c = robust_metrics.positional_error_class_counts
+        print("[Positional error taxonomy (index-based; T+Tab_3_1+Tab_3_2+correct=100%)]")
+        print(f"correct_rate:  {r['correct_rate']:.4f}  ({c['correct']}/{c['total_target']})")
+        print(f"Tab_3_1_rate:  {r['Tab_3_1_rate']:.4f}  ({c['Tab_3_1']})")
+        print(f"Tab_3_2_rate:  {r['Tab_3_2_rate']:.4f}  ({c['Tab_3_2']})")
+        print(f"T_rate:        {r['T_rate']:.4f}  ({c['T']})")
+        print(f"sum:           {r['correct_rate']+r['Tab_3_1_rate']+r['Tab_3_2_rate']+r['T_rate']:.4f}")
+        print("")
     print("[Baseline metrics — same as inference.py TabAccuracyMetrics]")
     print("")
     for line in _format_baseline_metrics_lines(baseline_metrics):
