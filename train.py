@@ -520,11 +520,14 @@ def main(cfg: DictConfig):
                 
                 current_tab_accuracy = ar_metrics.tab_accuracy
 
-                # Save generated samples
+                # Save generated samples safely
+                preds_np = predictions.cpu().numpy() if hasattr(predictions, 'cpu') else predictions
+                targets_np = targets.cpu().numpy() if hasattr(targets, 'cpu') else targets
+                
                 samples_file = output_dir / f"generated_samples_epoch_{epoch}.json"
                 save_generated_samples(
-                    predictions=predictions.cpu().numpy(),
-                    targets=targets.cpu().numpy(),
+                    predictions=preds_np,
+                    targets=targets_np,
                     output_vocab=dataset.output_vocab,
                     output_file=samples_file,
                     max_samples=10
@@ -638,14 +641,17 @@ def main(cfg: DictConfig):
         print(f"  Tab Accuracy:    {test_ar_metrics.tab_accuracy:.2%}")
         print(f"  Difficulty:        {test_ar_metrics.difficulty:.2f}")
 
-        # Save final test generated samples
+        # Save final test generated samples safely
+        preds_np = predictions.cpu().numpy() if hasattr(predictions, 'cpu') else predictions
+        targets_np = targets.cpu().numpy() if hasattr(targets, 'cpu') else targets
+        
         samples_file = output_dir / "test_generated_samples.json"
         save_generated_samples(
-            predictions=predictions.cpu().numpy(),
-            targets=targets.cpu().numpy(),
+            predictions=preds_np,
+            targets=targets_np,
             output_vocab=dataset.output_vocab,
             output_file=samples_file,
-            max_samples=20  # Save more samples for final test
+            max_samples=20
         )
 
         # Log test AR eval to history
